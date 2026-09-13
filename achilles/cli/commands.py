@@ -162,15 +162,45 @@ async def run_audit(cdp_port: int, page_id: Optional[str] = None) -> None:
         await services.close()
 
 
+def ensure_chrome_running(cdp_port: int):
+    import os
+    import socket
+    import subprocess
+    import time
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
+                return None
+    except Exception:
+        pass
+    
+    possible_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ]
+    chrome_bin = next((p for p in possible_paths if os.path.exists(p)), None)
+    if chrome_bin:
+        print(f"[*] Chrome CDP não detectado na porta {cdp_port}.")
+        print(f"[*] Iniciando Google Chrome com depuração na porta {cdp_port}...")
+        proc = subprocess.Popen([chrome_bin, f"--remote-debugging-port={cdp_port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(2.0)
+        return proc
+    return None
+
+
 async def run_interactive(cdp_port: int) -> None:
     from achilles.services.application import ApplicationServices
     _print_banner()
+    spawned_proc = ensure_chrome_running(cdp_port)
     print(f"Conectando ao Chrome CDP na porta {cdp_port}...")
     services = ApplicationServices(cdp_port)
     current_page_id: Optional[str] = None
     latest_snapshot: Optional[Dict[str, Any]] = None
 
-    print("\nModo Interativo iniciado! Digite 'help' para comandos ou 'exit' para sair.\n")
+    print("\n[✓] Modo Interativo do Achilles iniciado!")
+    print("    Digite 'help' para ver os comandos ou 'exit' para sair.\n")
     try:
         while True:
             try:

@@ -18,6 +18,15 @@ def port(value: str) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
+    if argv is None:
+        raw_args = sys.argv[1:]
+    else:
+        raw_args = list(argv)
+
+    # Se chamado sem argumentos (ex: apenas `achilles`), abre o modo interativo por padrão
+    if not raw_args:
+        raw_args = ["interactive"]
+
     parser = argparse.ArgumentParser(
         prog="achilles", description="Achilles — Chrome CDP Autonomous Agent & Security Suite"
     )
@@ -77,7 +86,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     mcp_p = commands.add_parser("mcp", help="Inicia MCP via stdio")
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_args)
 
     if args.command in ("interactive", "i", "repl"):
         from achilles.cli.commands import run_interactive
