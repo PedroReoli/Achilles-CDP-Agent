@@ -207,7 +207,7 @@ def print_help_table(i18n: I18n):
     console.print(table)
 
 
-async def run_pages(cdp_port: int, i18n: I18n, services=None) -> None:
+async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: Optional[str] = None) -> None:
     should_close = False
     if services is None:
         from achilles.services.application import ApplicationServices
@@ -217,7 +217,7 @@ async def run_pages(cdp_port: int, i18n: I18n, services=None) -> None:
     try:
         res = await services.call("browser_list_pages", {})
         pages = res.get("pages", [])
-        active_id = res.get("active_page_id")
+        active_id = current_page_id or res.get("active_page_id") or (pages[0]["page_id"] if pages else None)
         
         if not pages:
             console.print(f"[yellow]{i18n.t('no_pages')}[/]")
@@ -230,7 +230,7 @@ async def run_pages(cdp_port: int, i18n: I18n, services=None) -> None:
             header_style="bold #c084fc",
         )
         table.add_column("#", style="bold #c084fc", width=4, justify="center")
-        table.add_column("Status", width=12, justify="center")
+        table.add_column(i18n.t("col_status"), width=12, justify="center")
         table.add_column("Page ID", style="bold #e9d5ff", width=22)
         table.add_column("Título / Title", style="#f8fafc", width=32)
         table.add_column("URL", style="cyan", width=42)
@@ -472,15 +472,38 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 )
                 console.print(Panel(panel_content, title=f"[bold #c084fc]📊 {i18n.t('desc_status')}[/]", border_style="#a855f7", box=box.ROUNDED))
             elif cmd == "pages":
-                await run_pages(cdp_port, i18n=i18n, services=services)
+                await run_pages(cdp_port, i18n=i18n, services=services, current_page_id=current_page_id)
+                res_p = await services.call("browser_list_pages", {})
+                pages = res_p.get("pages", [])
+                if pages and not current_page_id:
+                    current_page_id = pages[0]["page_id"]
+                    current_url = pages[0]["url"]
             elif cmd == "select":
                 if not args:
-                    console.print(f"[yellow]Uso/Usage: /select <page_id>[/]")
+                    console.print(f"[yellow]Uso/Usage: /select <# ou page_id>[/]")
                     continue
-                target_id = args[0]
-                await services.call("browser_select_page", {"page_id": target_id})
-                current_page_id = target_id
-                console.print(f"[bold green][+][/] {i18n.t('tab_selected')} ([bold cyan]{target_id}[/])")
+                arg_val = args[0]
+                res_p = await services.call("browser_list_pages", {})
+                pages = res_p.get("pages", [])
+                
+                target_id = arg_val
+                if arg_val.isdigit():
+                    idx = int(arg_val) - 1
+                    if 0 <= idx < len(pages):
+                        target_id = pages[idx]["page_id"]
+                    else:
+                        console.print(f"[yellow]Número de aba inválido: {arg_val}. Total de abas: {len(pages)}[/]")
+                        continue
+                
+                try:
+                    await services.call("browser_select_page", {"page_id": target_id})
+                    current_page_id = target_id
+                    target_page = next((p for p in pages if p["page_id"] == target_id), None)
+                    if target_page:
+                        current_url = target_page["url"]
+                    console.print(f"[bold green][+][/] {i18n.t('tab_selected')} ([bold cyan]{target_id}[/])")
+                except Exception as exc:
+                    console.print(f"[yellow]Aviso: {exc}[/]")
             elif cmd in ("goto", "open"):
                 if not args:
                     console.print(f"[yellow]Uso/Usage: /{cmd} <url>[/]")

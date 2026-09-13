@@ -252,6 +252,7 @@ class BrowserSessionManager:
             )
         return {
             "pages": pages,
+            "active_page_id": self.registry.active_page_id,
             "generation": self.generation,
             "selection_policy": "explicit_or_latest_discovered",
         }
