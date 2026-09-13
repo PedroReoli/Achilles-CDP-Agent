@@ -393,6 +393,11 @@ async def run_interactive(cdp_port: int) -> None:
                     console.print(f"  • [{sev}] [bold #e9d5ff]{f.get('title')}[/]: {f.get('description')}")
             else:
                 console.print(f"[yellow]Comando não reconhecido: '{raw_cmd}'. Digite /help para ver os comandos.[/]")
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        pass
     finally:
-        await services.close()
-        console.print(f"\n[bold #a855f7]Sessão interativa do Achilles encerrada.[/]")
+        try:
+            await services.close()
+        except Exception:
+            pass
+        console.print(f"\n[bold #a855f7]Achilles encerrado com sucesso. Até logo![/]")

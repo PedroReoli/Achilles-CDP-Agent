@@ -88,45 +88,48 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     args = parser.parse_args(raw_args)
 
-    if args.command in ("interactive", "i", "repl"):
-        from achilles.cli.commands import run_interactive
-        asyncio.run(run_interactive(args.cdp_port))
-    elif args.command == "status":
-        from achilles.cli.commands import run_status
-        asyncio.run(run_status(args.cdp_port))
-    elif args.command == "pages":
-        from achilles.cli.commands import run_pages
-        asyncio.run(run_pages(args.cdp_port))
-    elif args.command in ("snapshot", "snap"):
-        from achilles.cli.commands import run_snapshot
-        asyncio.run(run_snapshot(args.cdp_port, args.page_id, args.limit))
-    elif args.command == "act":
-        from achilles.cli.commands import run_act
-        asyncio.run(run_act(args.cdp_port, args.action, args.element_ref, args.value, args.page_id))
-    elif args.command == "traffic":
-        from achilles.cli.commands import run_traffic
-        asyncio.run(run_traffic(args.cdp_port, args.page_id, args.limit))
-    elif args.command == "curl":
-        from achilles.cli.commands import run_curl
-        asyncio.run(run_curl(args.cdp_port, args.request_id, args.shell))
-    elif args.command == "audit":
-        from achilles.cli.commands import run_audit
-        asyncio.run(run_audit(args.cdp_port, args.page_id))
-    elif args.command == "start":
-        import uvicorn
-        from achilles.api.server import create_app
+    try:
+        if args.command in ("interactive", "i", "repl"):
+            from achilles.cli.commands import run_interactive
+            asyncio.run(run_interactive(args.cdp_port))
+        elif args.command == "status":
+            from achilles.cli.commands import run_status
+            asyncio.run(run_status(args.cdp_port))
+        elif args.command == "pages":
+            from achilles.cli.commands import run_pages
+            asyncio.run(run_pages(args.cdp_port))
+        elif args.command in ("snapshot", "snap"):
+            from achilles.cli.commands import run_snapshot
+            asyncio.run(run_snapshot(args.cdp_port, args.page_id, args.limit))
+        elif args.command == "act":
+            from achilles.cli.commands import run_act
+            asyncio.run(run_act(args.cdp_port, args.action, args.element_ref, args.value, args.page_id))
+        elif args.command == "traffic":
+            from achilles.cli.commands import run_traffic
+            asyncio.run(run_traffic(args.cdp_port, args.page_id, args.limit))
+        elif args.command == "curl":
+            from achilles.cli.commands import run_curl
+            asyncio.run(run_curl(args.cdp_port, args.request_id, args.shell))
+        elif args.command == "audit":
+            from achilles.cli.commands import run_audit
+            asyncio.run(run_audit(args.cdp_port, args.page_id))
+        elif args.command == "start":
+            import uvicorn
+            from achilles.api.server import create_app
 
-        uvicorn.run(
-            create_app(args.cdp_port, os.environ.get("ACHILLES_API_TOKEN")),
-            host="127.0.0.1",
-            port=args.port,
-            proxy_headers=False,
-            log_level="warning",
-            limit_concurrency=32,
-        )
-    elif args.command == "mcp":
-        from achilles.mcp.server import run_mcp_stdio
-        asyncio.run(run_mcp_stdio(args.cdp_port))
+            uvicorn.run(
+                create_app(args.cdp_port, os.environ.get("ACHILLES_API_TOKEN")),
+                host="127.0.0.1",
+                port=args.port,
+                proxy_headers=False,
+                log_level="warning",
+                limit_concurrency=32,
+            )
+        elif args.command == "mcp":
+            from achilles.mcp.server import run_mcp_stdio
+            asyncio.run(run_mcp_stdio(args.cdp_port))
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
 
 if __name__ == "__main__":
