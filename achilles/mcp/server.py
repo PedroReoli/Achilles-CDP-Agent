@@ -1,143 +1,165 @@
-"""
-server.py — Servidor MCP (Model Context Protocol) nativo para integração com Claude Desktop, Cursor e Antigravity.
-"""
-import sys
-import json
+"""MCP stdio JSON-RPC para Python 3.9, sem dependência do SDK 3.10+."""
+
 import asyncio
-from typing import Dict, Any
+import json
+import sys
+from typing import Any, Dict, Optional, Union
 
-from achilles.core.cdp_driver import CDPDriver
-from achilles.core.dom_parser import DOMSemanticParser
-from achilles.security.auditor import SecurityAuditor
-from achilles.reverse_api.openapi import OpenAPIGenerator
+from achilles.services.application import ApplicationServices
+from achilles.services.errors import ServiceError
 
-driver = CDPDriver()
+RequestId = Union[str, int]
+VERSIONS = ("2025-06-18", "2024-11-05")
 
 
-async def handle_mcp_request(req: Dict[str, Any]) -> Dict[str, Any]:
-    method = req.get("method")
-    req_id = req.get("id")
+class MCPServer:
+    def __init__(self, services: ApplicationServices) -> None:
+        self.services = services
+        self.initialized = False
+        self.negotiated = False
+        self.version = VERSIONS[0]
 
-    if method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
+    @staticmethod
+    def error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
+        return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+    async def handle(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        request_id = request.get("id")
+        method = request.get("method")
+        if request.get("jsonrpc") != "2.0" or not isinstance(method, str):
+            return self.error(request_id, -32600, "Invalid Request")
+        params = request.get("params", {})
+        if not isinstance(params, dict):
+            return self.error(request_id, -32602, "Invalid params") if "id" in request else None
+        if "id" not in request:
+            if method == "notifications/initialized" and self.negotiated:
+                self.initialized = True
+            return None
+        if not isinstance(request_id, (str, int)) or isinstance(request_id, bool):
+            return self.error(None, -32600, "Invalid request id")
+        result: Dict[str, Any]
+        if method == "initialize":
+            proposed = params.get("protocolVersion")
+            self.version = proposed if proposed in VERSIONS else VERSIONS[0]
+            self.negotiated = True
+            result = {
+                "protocolVersion": self.version,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "achilles-cdp-mcp", "version": "1.0.0"}
+                "serverInfo": {"name": "achilles-cdp", "version": "2.0.0"},
             }
-        }
-
-    if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {
-                "tools": [
-                    {
-                        "name": "achilles_get_dom_tree",
-                        "description": "Retorna árvore semântica compacta com IDs numéricos para a IA entender e agir na página.",
-                        "inputSchema": {"type": "object", "properties": {}}
-                    },
-                    {
-                        "name": "achilles_click_id",
-                        "description": "Executa clique no elemento pelo ID numérico retornado por achilles_get_dom_tree.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {"id": {"type": "integer", "description": "ID numérico do elemento"}},
-                            "required": ["id"]
+        elif method == "ping":
+            result = {}
+        elif not self.initialized:
+            return self.error(request_id, -32002, "Server not initialized")
+        elif method == "tools/list":
+            result = self.services.tools()
+            if self.version == "2024-11-05":
+                for tool in result["tools"]:
+                    tool.pop("outputSchema", None)
+                    tool.pop("annotations", None)
+        elif method == "tools/call":
+            name = params.get("name")
+            arguments = params.get("arguments", {})
+            if not isinstance(name, str) or not isinstance(arguments, dict):
+                return self.error(request_id, -32602, "Invalid tool arguments")
+            try:
+                data = await self.services.call(name, arguments)
+                result = {
+                    "content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}],
+                    "isError": False,
+                }
+                if self.version != "2024-11-05":
+                    result["structuredContent"] = data
+            except ServiceError as exc:
+                result = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps({"error": exc.as_dict()}, ensure_ascii=False),
                         }
-                    },
-                    {
-                        "name": "achilles_fill_id",
-                        "description": "Preenche um input pelo ID numérico.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "id": {"type": "integer", "description": "ID numérico do campo"},
-                                "value": {"type": "string", "description": "Texto a preencher"}
-                            },
-                            "required": ["id", "value"]
-                        }
-                    },
-                    {
-                        "name": "achilles_security_audit",
-                        "description": "Executa auditoria de vulnerabilidades OWASP Top 10, Supabase RLS e vazamento de secrets na aba ativa.",
-                        "inputSchema": {"type": "object", "properties": {}}
-                    }
-                ]
-            }
-        }
-
-    if method == "tools/call":
-        params = req.get("params", {})
-        tool_name = params.get("name")
-        args = params.get("arguments", {})
-
-        page = await driver.get_page()
-
-        if tool_name == "achilles_get_dom_tree":
-            data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-            tree_text = DOMSemanticParser.format_tree_for_llm(data["elements"])
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": tree_text}]}
-            }
-
-        elif tool_name == "achilles_click_id":
-            target_id = args.get("id")
-            data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-            target = next((el for el in data["elements"] if el["id"] == target_id), None)
-            if not target:
-                return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": f"Elemento #{target_id} não encontrado"}}
-            b = target["bounds"]
-            await page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-            return {"jsonrpc": "2.0", "id": req_id, "result": {"content": [{"type": "text", "text": f"Clicado em elemento #{target_id}: {target.get('text')}"}]}}
-
-        elif tool_name == "achilles_fill_id":
-            target_id = args.get("id")
-            val = args.get("value", "")
-            data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-            target = next((el for el in data["forms"] if el["id"] == target_id), None)
-            if not target:
-                return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": f"Campo #{target_id} não encontrado"}}
-            b = target["bounds"]
-            await page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-            await page.keyboard.type(val, delay=15)
-            return {"jsonrpc": "2.0", "id": req_id, "result": {"content": [{"type": "text", "text": f"Preenchido campo #{target_id} com sucesso"}]}}
-
-        elif tool_name == "achilles_security_audit":
-            storage = await page.evaluate("() => ({ localStorage: { ...localStorage }, sessionStorage: { ...sessionStorage } })")
-            cookies = await page.context.cookies([page.url])
-            dom_meta = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-            audit_res = SecurityAuditor.audit(page.url, await page.title(), {}, cookies, storage["localStorage"], storage["sessionStorage"], [], dom_meta)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(audit_res, indent=2, ensure_ascii=False)}]}
-            }
-
-    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": f"Método não encontrado: {method}"}}
+                    ],
+                    "isError": True,
+                }
+        else:
+            return self.error(request_id, -32601, "Method not found")
+        return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-async def run_mcp_stdio():
-    loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+async def run_mcp_stdio(cdp_port: int = 9222) -> None:
+    services = ApplicationServices(cdp_port)
+    server = MCPServer(services)
+    pending: Dict[RequestId, asyncio.Task[Any]] = {}
+    output_lock = asyncio.Lock()
 
-    while True:
-        line = await reader.readline()
-        if not line:
-            break
+    async def write(response: Dict[str, Any]) -> None:
+        encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+        async with output_lock:
+            await asyncio.to_thread(sys.stdout.buffer.write, encoded)
+            await asyncio.to_thread(sys.stdout.buffer.flush)
+
+    async def dispatch(request: Dict[str, Any]) -> None:
+        request_id = request.get("id")
         try:
-            req = json.loads(line.decode("utf-8"))
-            res = await handle_mcp_request(req)
-            sys.stdout.write(json.dumps(res) + "\n")
-            sys.stdout.flush()
-        except Exception as e:
-            err_res = {"jsonrpc": "2.0", "id": None, "error": {"code": -32603, "message": str(e)}}
-            sys.stdout.write(json.dumps(err_res) + "\n")
-            sys.stdout.flush()
+            response = await server.handle(request)
+            if response is not None:
+                await write(response)
+        except asyncio.CancelledError:
+            if "id" in request:
+                await write(
+                    server.error(
+                        request_id, -32800, "Request cancelled; observe state before retrying"
+                    )
+                )
+        except Exception:
+            if "id" in request:
+                await write(server.error(request_id, -32603, "Internal error"))
+        finally:
+            if isinstance(request_id, (str, int)):
+                pending.pop(request_id, None)
+
+    try:
+        while True:
+            line = await asyncio.to_thread(sys.stdin.buffer.readline, 1048577)
+            if not line:
+                break
+            if len(line) > 1048576:
+                await write(server.error(None, -32600, "Message too large"))
+                break
+            try:
+                request = json.loads(line)
+            except (ValueError, UnicodeError):
+                await write(server.error(None, -32700, "Parse error"))
+                continue
+            if not isinstance(request, dict):
+                await write(server.error(None, -32600, "Invalid Request"))
+                continue
+            if request.get("method") == "notifications/cancelled":
+                params = request.get("params", {})
+                target = params.get("requestId") if isinstance(params, dict) else None
+                if isinstance(target, (str, int)) and target in pending:
+                    pending[target].cancel()
+                continue
+            request_id = request.get("id")
+            if (
+                request.get("method") in ("initialize", "notifications/initialized")
+                or "id" not in request
+            ):
+                await dispatch(request)
+            elif not isinstance(request_id, (str, int)) or isinstance(request_id, bool):
+                await write(server.error(None, -32600, "Invalid request id"))
+            elif request_id in pending or len(pending) >= 32:
+                await write(server.error(request_id, -32000, "Duplicate id or concurrency limit"))
+            else:
+                pending[request_id] = asyncio.create_task(dispatch(request))
+        if pending:
+            _, unfinished = await asyncio.wait(list(pending.values()), timeout=10)
+            for task in unfinished:
+                task.cancel()
+            if unfinished:
+                await asyncio.gather(*unfinished, return_exceptions=True)
+    finally:
+        for task in list(pending.values()):
+            task.cancel()
+        if pending:
+            await asyncio.gather(*list(pending.values()), return_exceptions=True)
+        await services.close()

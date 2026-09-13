@@ -1,127 +1,58 @@
-# 🛡️⚡ Achilles CDP Agent
+# Achilles CDP Agent
 
-> **Autonomous Agentic Chrome DevTools Protocol (CDP) Bridge & Security/API Engine**  
-> *Open Source • 100% AI-Friendly • Native Model Context Protocol (MCP) • Standalone Windows Executable*
+Framework Python 3.9+ que conecta agentes de IA a Chrome/Chromium via CDP. REST e MCP usam os mesmos Application Services: sessão, captura de rede, snapshots, ações e auditoria passiva.
 
----
+## Executar
 
-## 🏛️ Visão Geral
-
-O **Achilles CDP Agent** é um framework e agente autônomo em Python construído para conectar Inteligências Artificiais (Claude, Cursor, Antigravity, Ollama, GPT-4) diretamente a instâncias reais de navegadores Chromium/Chrome via **Chrome DevTools Protocol (porta `9222`)**.
-
-O sistema foi arquitetado para transformar qualquer navegador em uma **API conversável para IAs**, com recursos avançados de:
-1. **Árvore Semântica de Acessibilidade** (IDs numéricos indexados que reduzem o consumo de tokens em até 95%).
-2. **Auditoria Profunda de Segurança & Vulnerabilidades** (OWASP Top 10, OWASP API Security, Supabase RLS bypass detection, vazamento de secrets e integridade de banco de dados).
-3. **Engenharia Reversa Automática de APIs** (Geração dinâmica de OpenAPI 3.0.0 e Swagger UI interativo a partir do tráfego de rede).
-4. **Exportação Determinística de Testes E2E** (Scripts prontos em Playwright para CI/CD).
-5. **Visual Overlay no Navegador** (Badges visuais `[#1]`, `[#2]` injetados na tela em tempo real).
-6. **Servidor Nativo MCP (Model Context Protocol)** para integração direta com Claude Desktop e Cursor.
-
----
-
-## 🚀 Instalação & Execução
-
-### Opção 1: Executável Standalone para Windows (.exe)
-Baixe o arquivo `achilles.exe` na aba de [Releases](https://github.com/PedroReoli/achilles-cdp) e execute no terminal:
-
-```bash
-# Inicia a interface interativa no terminal e o servidor AI Bridge
-achilles.exe start --port 8765 --cdp-port 9222
+```powershell
+python -m pip install -e ".[test]"
+python -m achilles start --cdp-port 9222 --port 8765
+python -m achilles mcp --cdp-port 9222
 ```
 
-### Opção 2: Via Python / Git (Desenvolvimento)
-```bash
-# Clone o repositório
-git clone https://github.com/PedroReoli/achilles-cdp.git
-cd "Achilles CDP Agent"
+O Chrome deve estar iniciado com depuração remota e perfil próprio. O modo attach preserva o navegador ao encerrar o Achilles.
 
-# Instale as dependências
-pip install -r requirements.txt
+REST escuta somente em `127.0.0.1` e exige Bearer token. Configure `ACHILLES_API_TOKEN` ou utilize o token gerado no stderr ao iniciar. A opção `--cdp-port` também está disponível no MCP.
 
-# Inicie a CLI
-python -m achilles start
-```
+## API e MCP
 
----
+O catálogo está em `GET /api/tools.json` e MCP `tools/list`. Execute uma operação via `POST /api/tools/{name}` ou MCP `tools/call`.
 
-## 🖥️ Interface de Terminal (TUI)
+- `browser_status`, `browser_list_pages`, `browser_select_page`
+- `browser_snapshot`, `browser_action`
+- `network_query`, `network_curl`, `network_postman`
+- `security_audit`
 
-O Achilles vem com uma interface rica no terminal baseada no `Rich` e `Typer`:
-
-```text
-   ___         __     _  __ __               _____   ___     ___                    __ 
-  / _ | ____  / /    (_)/ // / ___  ___     / ___/  / _ \   / _ \  ___ _ ___  ___  / /_
- / __ |/ __/ / _ \  / // // / / -_)(_-<    / /__   / // /  / ___/ / _ `// -_)/ _ \/ __/
-/_/ |_|\__/ /_//_/ /_//_//_/  \__//___/    \___/  /____/  /_/     \_, / \__/ /_//_/\__/ 
-                                                                 /___/                  
-```
-
-### Subcomandos da CLI:
-* `achilles start` — Sobe o servidor REST AI Bridge, Swagger reverso e monitor de tráfego.
-* `achilles mcp` — Inicia o servidor MCP via `stdio` para agentes de IA.
-
----
-
-## 🔌 Configuração do Servidor MCP (Claude Desktop & Cursor)
-
-Para conectar o Achilles diretamente ao **Claude Desktop**, adicione ao seu arquivo `claude_desktop_config.json`:
+Snapshots retornam `snapshot_id`, `page_id` e `element_ref`. Ações exigem essas referências e usam Locators nativos, com detecção de referências obsoletas. Headers de resposta alimentam a auditoria; exports de rede possuem redação de credenciais.
 
 ```json
 {
   "mcpServers": {
-    "achilles-cdp": {
+    "achilles": {
       "command": "achilles",
-      "args": ["mcp"]
+      "args": ["mcp", "--cdp-port", "9222"]
     }
   }
 }
 ```
 
-### Ferramentas Expostas para a IA:
-* `achilles_get_dom_tree`: Retorna a árvore semântica compacta com IDs numéricos para a IA entender e decidir a próxima ação.
-* `achilles_click_id`: Executa cliques por ID numérico (`id: 1`).
-* `achilles_fill_id`: Preenche inputs por ID numérico (`id: 2, value: "texto"`).
-* `achilles_security_audit`: Executa auditoria instantânea de segurança na página ativa.
+## Testes
 
----
-
-## 🛡️ Endpoints da API REST
-
-| Endpoint | Método | Descrição |
-| :--- | :--- | :--- |
-| `/api/status` | `GET` | Retorna saúde da conexão CDP e métricas da aba ativa. |
-| `/api/dom/tree` | `GET` | Árvore de acessibilidade semântica com IDs indexados. |
-| `/api/dom/highlight` | `POST` | Injeta badges flutuantes `[#1]`, `[#2]` no Chrome real. |
-| `/api/dom/clear-highlight` | `POST` | Remove os badges visuais da tela. |
-| `/api/routes/openapi.json` | `GET` | Especificação OpenAPI 3.0.0 deduzida do tráfego capturado. |
-| `/api/routes/swagger` | `GET` | Interface visual do Swagger UI rodando sobre o portal inspecionado. |
-| `/api/routes/postman` | `GET` | Exportação de requisições no formato Postman Collection v2.1.0. |
-| `/api/security/audit` | `GET` | Diagnóstico de vulnerabilidades OWASP, Supabase RLS e Risk Score (0-100). |
-| `/api/export/playwright-test` | `GET` | Gera arquivo `test_flow.py` para testes automatizados. |
-| `/api/tools.json` | `GET` | Contratos de Tool Calling para OpenAI, Gemini e Claude. |
-
----
-
-## 🧪 Testes Automatizados
-
-```bash
-# Executa a suíte completa de testes unitários
+```powershell
+python -m unittest discover tests -v
+python -m playwright install chromium
+$env:ACHILLES_BROWSER_TESTS = '1'
 python -m unittest discover tests -v
 ```
 
----
+Os testes de browser usam Chromium descartável e um servidor de fixtures local.
 
-## 📦 Compilação de Novo Executável (.exe)
+## Documentação
 
-```bash
-python packaging/build_exe.py
-```
+[Arquitetura, contratos, limites e migração da v1](.docs/application-services.md).
 
-O binário final é gerado em `dist/achilles.exe`.
+A versão 2 altera os contratos de IDs e ferramentas. Recursos legados fora do novo catálogo não são expostos pelos transportes. Consulte o guia de migração antes de atualizar clientes existentes.
 
----
+O executável existente em `dist` é anterior à refatoração. O startup abaixo de 300 ms foi medido para a CLI Python; não representa uma medição do binário onefile.
 
-## 📜 Licença & Governança
-
-Projeto distribuído sob a licença **MIT Permissiva**.  
-Governança e padrões de código alinhados ao ecossistema **ReoliCode**.
+Licença MIT. Pedro Lucas Reis / Reoli Open Source.

@@ -1,199 +1,150 @@
-"""
-server.py — Servidor FastAPI do Achilles CDP Agent.
-"""
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse
-from pydantic import BaseModel
+"""REST local autenticado; toda operação delega aos Application Services."""
 
-from achilles.core.cdp_driver import CDPDriver
-from achilles.core.dom_parser import DOMSemanticParser
-from achilles.core.network_recorder import NetworkRecorder
-from achilles.core.visual_overlay import JS_INJECT_OVERLAY, JS_REMOVE_OVERLAY
-from achilles.security.auditor import SecurityAuditor
-from achilles.reverse_api.openapi import OpenAPIGenerator
-from achilles.testing.playwright_exporter import PlaywrightTestExporter
+import hmac
+import ipaddress
+import os
+import secrets
+import sys
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, Optional
 
-driver = CDPDriver()
-recorder = NetworkRecorder()
-driver.register_request_callback(recorder.record)
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-app = FastAPI(
-    title="Achilles CDP Agent API",
-    description="Interface REST e AI Bridge para Automação, Engenharia Reversa e Auditoria de Browser via CDP.",
-    version="1.0.0"
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from achilles.services.application import ApplicationServices
+from achilles.services.errors import ServiceError
 
 
-@app.get("/api/status")
-async def get_status():
-    page = await driver.get_page()
-    return {
-        "status": "connected",
-        "cdp_url": driver.cdp_url,
-        "title": await page.title(),
-        "url": page.url,
-        "recorded_requests": len(recorder.requests)
-    }
+class BodyLimit:
+    def __init__(self, app: ASGIApp, max_bytes: int = 1048576) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        parts = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.max_bytes:
+                await JSONResponse({"error": {"code": "PAYLOAD_TOO_LARGE"}}, status_code=413)(
+                    scope, receive, send
+                )
+                return
+            parts.append(body)
+            if not message.get("more_body", False):
+                break
+        delivered = False
+
+        async def bounded_receive() -> Message:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": b"".join(parts), "more_body": False}
+            return await receive()
+
+        await self.app(scope, bounded_receive, send)
 
 
-@app.get("/api/dom/tree")
-async def get_dom_tree(format_for_llm: bool = Query(True)):
-    page = await driver.get_page()
-    data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-    if format_for_llm:
-        return {
-            "title": data["title"],
-            "url": data["url"],
-            "total_elements": len(data["elements"]),
-            "llm_prompt_tree": DOMSemanticParser.format_tree_for_llm(data["elements"]),
-            "elements": data["elements"]
-        }
-    return data
+def create_app(
+    cdp_port: int = 9222,
+    token: Optional[str] = None,
+    services: Optional[ApplicationServices] = None,
+) -> FastAPI:
+    configured_token = token or os.environ.get("ACHILLES_API_TOKEN")
+    access_token = configured_token or secrets.token_urlsafe(32)
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.services = services if services is not None else ApplicationServices(cdp_port)
+        if not configured_token:
+            print(f"Achilles local API token: {access_token}", file=sys.stderr)
+        try:
+            yield
+        finally:
+            await app.state.services.close()
 
-@app.post("/api/dom/highlight")
-async def inject_highlight():
-    page = await driver.get_page()
-    res = await page.evaluate(JS_INJECT_OVERLAY)
-    return {"success": True, "details": res}
+    app = FastAPI(title="Achilles CDP Agent", version="2.0.0", lifespan=lifespan)
+    app.add_middleware(BodyLimit)
 
+    @app.middleware("http")
+    async def local_only(request: Request, call_next: Any) -> Any:
+        try:
+            peer = ipaddress.ip_address(request.client.host if request.client else "0.0.0.0")
+            host = request.headers.get("host", "").split(":", 1)[0]
+            permitted = peer.is_loopback and host in ("127.0.0.1", "localhost")
+        except ValueError:
+            permitted = False
+        if not permitted:
+            return JSONResponse({"error": {"code": "LOOPBACK_REQUIRED"}}, status_code=403)
+        if request.headers.get("origin"):
+            return JSONResponse({"error": {"code": "BROWSER_ORIGIN_BLOCKED"}}, status_code=403)
+        supplied = request.headers.get("authorization", "")
+        if not hmac.compare_digest(
+            supplied.encode("utf-8"), ("Bearer " + access_token).encode("utf-8")
+        ):
+            return JSONResponse({"error": {"code": "UNAUTHORIZED"}}, status_code=401)
+        return await call_next(request)
 
-@app.post("/api/dom/clear-highlight")
-async def clear_highlight():
-    page = await driver.get_page()
-    res = await page.evaluate(JS_REMOVE_OVERLAY)
-    return {"success": True, "details": res}
+    @app.exception_handler(ServiceError)
+    async def service_error(request: Request, exc: ServiceError) -> JSONResponse:
+        status = {
+            "INVALID_ARGUMENT": 422,
+            "UNKNOWN_TOOL": 404,
+            "RECORD_NOT_FOUND": 404,
+            "CDP_UNAVAILABLE": 503,
+            "PAGE_CLOSED": 409,
+            "STALE_ELEMENT_REF": 409,
+        }.get(exc.code, 409)
+        return JSONResponse({"error": exc.as_dict()}, status_code=status)
 
+    @app.get("/api/tools.json")
+    async def tools() -> Dict[str, Any]:
+        return ApplicationServices.tools()
 
-@app.get("/api/routes/apis")
-async def get_apis(limit: int = 50):
-    return {"total": len(recorder.requests), "requests": recorder.requests[:limit]}
+    @app.post("/api/tools/{name}")
+    async def call(name: str, arguments: Dict[str, Any], request: Request) -> Dict[str, Any]:
+        return await request.app.state.services.call(name, arguments)
 
+    @app.get("/api/status")
+    async def status(request: Request) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_status", {})
 
-@app.get("/api/routes/postman")
-async def get_postman():
-    return recorder.to_postman_collection("Achilles Exported APIs")
+    @app.get("/api/dom/tree")
+    async def tree(
+        request: Request, page_id: Optional[str] = None, limit: int = 200
+    ) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "browser_snapshot", {"page_id": page_id, "limit": limit}
+        )
 
+    @app.get("/api/security/audit")
+    async def audit(request: Request, page_id: Optional[str] = None) -> Dict[str, Any]:
+        return await request.app.state.services.call("security_audit", {"page_id": page_id})
 
-@app.get("/api/routes/openapi.json")
-async def get_openapi_spec(title: str = "Achilles Reverse API"):
-    return OpenAPIGenerator.generate_spec(recorder.requests, title=title)
+    @app.get("/api/routes/apis")
+    async def network(
+        request: Request, page_id: Optional[str] = None, limit: int = 50
+    ) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "network_query", {"page_id": page_id, "limit": limit}
+        )
 
+    @app.get("/api/routes/postman")
+    async def postman(request: Request) -> Dict[str, Any]:
+        return await request.app.state.services.call("network_postman", {})
 
-@app.get("/api/routes/swagger", response_class=HTMLResponse)
-async def get_swagger_ui():
-    return OpenAPIGenerator.get_swagger_html("/api/routes/openapi.json")
+    @app.post("/api/action/{action}")
+    async def action(request: Request, action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "browser_action", {**arguments, "action": action}
+        )
 
-
-@app.get("/api/export/playwright-test", response_class=PlainTextResponse)
-async def export_playwright():
-    page = await driver.get_page()
-    return PlaywrightTestExporter.generate_python(page.url, recorder.requests)
-
-
-@app.get("/api/security/audit")
-async def run_audit():
-    page = await driver.get_page()
-    js_storage = """
-    () => {
-        const local = {};
-        for (let i = 0; i < localStorage.length; i++) local[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
-        const session = {};
-        for (let i = 0; i < sessionStorage.length; i++) session[sessionStorage.key(i)] = sessionStorage.getItem(sessionStorage.key(i));
-        return { localStorage: local, sessionStorage: session };
-    }
-    """
-    storage = await page.evaluate(js_storage)
-    cookies = await page.context.cookies([page.url])
-    dom_meta = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-    
-    main_headers = {}
-    for r in reversed(recorder.requests):
-        if r.get("url") == page.url:
-            main_headers = r.get("headers", {})
-            break
-
-    return SecurityAuditor.audit(
-        page_url=page.url,
-        page_title=await page.title(),
-        page_headers=main_headers,
-        cookies=cookies,
-        local_storage=storage.get("localStorage", {}),
-        session_storage=storage.get("sessionStorage", {}),
-        recorded_requests=recorder.requests,
-        dom_meta=dom_meta
-    )
-
-
-class ClickModel(BaseModel):
-    id: Optional[int] = None
-    selector: Optional[str] = None
-    text: Optional[str] = None
-
-
-class FillModel(BaseModel):
-    id: Optional[int] = None
-    selector: Optional[str] = None
-    value: str
-
-
-@app.post("/api/action/click")
-async def click_action(req: ClickModel):
-    page = await driver.get_page()
-    if req.id:
-        data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-        target = next((el for el in data["elements"] if el["id"] == req.id), None)
-        if not target:
-            raise HTTPException(404, f"Elemento #{req.id} não encontrado")
-        b = target["bounds"]
-        await page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-        return {"success": True, "clicked": target}
-    elif req.selector:
-        await page.click(req.selector)
-        return {"success": True, "selector": req.selector}
-    elif req.text:
-        await page.click(f"text={req.text}")
-        return {"success": True, "text": req.text}
-    raise HTTPException(400, "Forneça id, selector ou text")
-
-
-@app.post("/api/action/fill")
-async def fill_action(req: FillModel):
-    page = await driver.get_page()
-    if req.id:
-        data = await page.evaluate(DOMSemanticParser.JS_EXTRACT_TREE)
-        target = next((el for el in data["forms"] if el["id"] == req.id), None)
-        if not target:
-            raise HTTPException(404, f"Input #{req.id} não encontrado")
-        b = target["bounds"]
-        await page.mouse.click(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2)
-        await page.keyboard.type(req.value, delay=15)
-        return {"success": True, "filled": target, "value": req.value}
-    elif req.selector:
-        await page.fill(req.selector, req.value)
-        return {"success": True, "selector": req.selector}
-    raise HTTPException(400, "Forneça id ou selector")
-
-
-@app.get("/api/tools.json")
-async def get_tools():
-    return {
-        "tools": [
-            {"name": "get_dom_tree", "description": "Obtém árvore semântica com IDs para decidir ação"},
-            {"name": "click_element", "description": "Clica em elemento por ID numérico ou texto"},
-            {"name": "fill_input", "description": "Digita em input por ID numérico"},
-            {"name": "run_security_audit", "description": "Audita OWASP, RLS e headers da página"},
-            {"name": "highlight_elements", "description": "Injeta badges [#1], [#2] visuais no Chrome"},
-            {"name": "get_api_curls", "description": "Retorna requisições XHR/Fetch com cURLs prontos"}
-        ]
-    }
+    return app

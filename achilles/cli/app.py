@@ -1,38 +1,49 @@
-"""
-app.py — CLI do Achilles CDP Agent com Typer e subcomandos.
-"""
-import asyncio
-import typer
-import uvicorn
-from achilles.cli.tui import render_banner, render_status_table, console
-from achilles.api.server import app as fastapi_app
-from achilles.mcp.server import run_mcp_stdio
+"""Bootstrap leve: --help não importa transports, Pydantic ou Playwright."""
 
-cli = typer.Typer(
-    name="achilles",
-    help="Achilles CDP Agent — Interface CLI para Automação, Engenharia Reversa e Auditoria via Chrome DevTools Protocol."
-)
+import argparse
+import os
+from typing import Optional, Sequence
 
 
-@cli.command("start")
-def start_server(
-    port: int = typer.Option(8765, "--port", "-p", help="Porta para o servidor FastAPI Bridge"),
-    cdp_port: int = typer.Option(9222, "--cdp-port", "-c", help="Porta do Chrome CDP"),
-    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host de ligação")
-):
-    """Inicia o servidor AI Bridge e a interface interativa no terminal."""
-    render_banner()
-    render_status_table(cdp_port=cdp_port, api_port=port, status="CONNECTING", active_url="http://localhost:9222", requests_count=0, risk_score=0)
-    console.print(f"\n[bold green]✓ Achilles CDP Agent rodando em http://{host}:{port}[/bold green]")
-    console.print("[dim]Pressione Ctrl+C para encerrar o servidor.[/dim]\n")
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="warning")
+def port(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Porta deve ser inteira") from exc
+    if not 1 <= number <= 65535:
+        raise argparse.ArgumentTypeError("Porta deve estar entre 1 e 65535")
+    return number
 
 
-@cli.command("mcp")
-def start_mcp():
-    """Inicia o servidor MCP (Model Context Protocol) via stdio para Claude Desktop / Cursor."""
-    asyncio.run(run_mcp_stdio())
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="achilles", description="Achilles — Chrome CDP Application Services"
+    )
+    parser.add_argument("--version", action="version", version="achilles 2.0.0")
+    commands = parser.add_subparsers(dest="command", required=True)
+    start = commands.add_parser("start", help="Inicia REST autenticado em 127.0.0.1")
+    start.add_argument("--port", "-p", type=port, default=8765)
+    start.add_argument("--cdp-port", "-c", type=port, default=9222)
+    start.add_argument("--host", choices=["127.0.0.1"], default="127.0.0.1")
+    mcp = commands.add_parser("mcp", help="Inicia MCP via stdio")
+    mcp.add_argument("--cdp-port", "-c", type=port, default=9222)
+    args = parser.parse_args(argv)
+    if args.command == "start":
+        import uvicorn
 
+        from achilles.api.server import create_app
 
-def main():
-    cli()
+        uvicorn.run(
+            create_app(args.cdp_port, os.environ.get("ACHILLES_API_TOKEN")),
+            host="127.0.0.1",
+            port=args.port,
+            proxy_headers=False,
+            log_level="warning",
+            limit_concurrency=32,
+        )
+    else:
+        import asyncio
+
+        from achilles.mcp.server import run_mcp_stdio
+
+        asyncio.run(run_mcp_stdio(args.cdp_port))
