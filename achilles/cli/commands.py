@@ -145,6 +145,12 @@ def print_help_table(i18n: I18n):
         "/select page_1234",
     )
     table.add_row(
+        i18n.t("cat_nav"),
+        "/scroll [dir/pixels]",
+        i18n.t("desc_scroll"),
+        "/scroll down 500",
+    )
+    table.add_row(
         i18n.t("cat_inspect"),
         "/snapshot (ou /snap)",
         i18n.t("desc_snap"),
@@ -512,12 +518,48 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 if not url.startswith("http://") and not url.startswith("https://"):
                     url = "https://" + url
                 
-                page_id_resolved, page_obj = await services.session.page(current_page_id)
-                current_page_id = page_id_resolved
-                current_url = url
                 console.print(f"[bold #a855f7][*][/] {i18n.t('navigating_to')} [cyan]{url}[/]...")
-                await page_obj.goto(url, wait_until="domcontentloaded")
-                console.print(f"[bold green][+][/] {i18n.t('nav_success')} [bold cyan]{url}[/]!")
+                try:
+                    res_nav = await services.call("browser_navigate", {
+                        "url": url,
+                        "page_id": current_page_id,
+                        "wait_until": "domcontentloaded",
+                        "timeout_ms": 20000
+                    })
+                    current_page_id = res_nav.get("page_id", current_page_id)
+                    current_url = res_nav.get("url", url)
+                    console.print(f"[bold green][+][/] {i18n.t('nav_success')} [bold cyan]{current_url}[/]!")
+                except Exception as exc:
+                    console.print(f"[yellow]Aviso / Warning: {exc}[/]")
+            elif cmd in ("scroll", "rolar"):
+                direction = "down"
+                amount = 500
+                if args:
+                    first = args[0].lower()
+                    if first in ("up", "cima"):
+                        direction = "up"
+                        if len(args) > 1 and args[1].isdigit():
+                            amount = int(args[1])
+                    elif first in ("top", "topo"):
+                        direction = "top"
+                    elif first in ("bottom", "fim", "baixo"):
+                        direction = "bottom"
+                    elif first in ("down",):
+                        direction = "down"
+                        if len(args) > 1 and args[1].isdigit():
+                            amount = int(args[1])
+                    elif first.isdigit():
+                        amount = int(first)
+                
+                try:
+                    res_scr = await services.call("browser_scroll", {
+                        "direction": direction,
+                        "amount": amount,
+                        "page_id": current_page_id
+                    })
+                    console.print(f"[bold green][+][/] {i18n.t('scroll_success', direction=direction)}")
+                except Exception as exc:
+                    console.print(f"[yellow]Aviso / Warning: {exc}[/]")
             elif cmd in ("snapshot", "snap"):
                 await run_snapshot(cdp_port, i18n=i18n, page_id=current_page_id, limit=200, services=services)
             elif cmd == "click":

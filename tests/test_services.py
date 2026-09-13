@@ -134,6 +134,10 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ServiceError):
             await app.call("browser_snapshot", {"limit": -1})
         with self.assertRaises(ServiceError):
+            await app.call("browser_navigate", {"url": ""})
+        with self.assertRaises(ServiceError):
+            await app.call("browser_scroll", {"direction": "invalid_dir"})
+        with self.assertRaises(ServiceError):
             await app.call(
                 "browser_action",
                 {"action": "fill", "page_id": "p", "snapshot_id": "s", "element_ref": "e"},

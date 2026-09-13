@@ -263,6 +263,79 @@ class BrowserSessionManager:
         self.registry.active_page_id = key
         return {"page_id": key, "url": redact_url(page.url)}
 
+    async def navigate(
+        self,
+        url: str,
+        page_id: Optional[str] = None,
+        wait_until: str = "domcontentloaded",
+        timeout_ms: int = 15000,
+    ) -> Dict[str, Any]:
+        key, page = await self.page(page_id)
+        async with self.registry.locks[key]:
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
+            try:
+                valid_wait = wait_until if wait_until in ("load", "domcontentloaded", "networkidle", "commit") else "domcontentloaded"
+                response = await page.goto(url, wait_until=valid_wait, timeout=timeout_ms)  # type: ignore[arg-type]
+                status_code = response.status if response else 200
+            except PlaywrightTimeoutError as exc:
+                raise ServiceError("OPERATION_TIMEOUT", "A navegação excedeu o tempo limite estipulado.") from exc
+            except PlaywrightError as exc:
+                raise ServiceError("NAVIGATION_ERROR", f"Falha ao navegar: {str(exc)}") from exc
+
+            title = ""
+            try:
+                title = await page.title()
+            except Exception:
+                pass
+
+            return {
+                "status": "navigated",
+                "page_id": key,
+                "url": redact_url(page.url),
+                "http_status": status_code,
+                "title": redact(title),
+            }
+
+    async def scroll(
+        self,
+        direction: str = "down",
+        amount: int = 500,
+        selector: Optional[str] = None,
+        page_id: Optional[str] = None,
+        timeout_ms: int = 5000,
+    ) -> Dict[str, Any]:
+        key, page = await self.page(page_id)
+        async with self.registry.locks[key]:
+            try:
+                script = """({direction, amount, selector}) => {
+                    let target = selector ? document.querySelector(selector) : (document.scrollingElement || document.documentElement || document.body);
+                    if (!target) return { scrolled: false, error: 'Container não encontrado' };
+                    
+                    let prevY = target.scrollTop !== undefined ? target.scrollTop : window.scrollY;
+                    if (direction === 'down') {
+                        if (selector) target.scrollTop += amount; else window.scrollBy(0, amount);
+                    } else if (direction === 'up') {
+                        if (selector) target.scrollTop -= amount; else window.scrollBy(0, -amount);
+                    } else if (direction === 'top') {
+                        if (selector) target.scrollTop = 0; else window.scrollTo(0, 0);
+                    } else if (direction === 'bottom') {
+                        if (selector) target.scrollTop = target.scrollHeight; else window.scrollTo(0, document.body.scrollHeight);
+                    }
+                    let newY = target.scrollTop !== undefined ? target.scrollTop : window.scrollY;
+                    return { scrolled: true, previous_y: prevY, current_y: newY, delta: newY - prevY };
+                }"""
+                res = await page.evaluate(script, {"direction": direction, "amount": amount, "selector": selector})
+                await asyncio.sleep(0.3)
+                return {
+                    "status": "scrolled",
+                    "page_id": key,
+                    "direction": direction,
+                    "details": res,
+                    "url": redact_url(page.url),
+                }
+            except Exception as exc:
+                raise ServiceError("SCROLL_ERROR", f"Falha ao rolar a página: {str(exc)}") from exc
+
     async def drain(self) -> None:
         tasks = list(self._tasks)
         if tasks:

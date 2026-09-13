@@ -26,6 +26,19 @@ class SelectArguments(Arguments):
     page_id: str = Field(min_length=1, max_length=128)
 
 
+class NavigateArguments(PageArguments):
+    url: str = Field(min_length=1, max_length=4096)
+    wait_until: Literal["load", "domcontentloaded", "networkidle", "commit"] = "domcontentloaded"
+    timeout_ms: int = Field(15000, ge=500, le=60000)
+
+
+class ScrollArguments(PageArguments):
+    direction: Literal["up", "down", "top", "bottom"] = "down"
+    amount: int = Field(500, ge=1, le=50000)
+    selector: Optional[str] = Field(None, max_length=256)
+    timeout_ms: int = Field(5000, ge=100, le=30000)
+
+
 class SnapshotArguments(PageArguments):
     limit: int = Field(200, ge=1, le=1000)
 
@@ -58,6 +71,8 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "browser_status": Arguments,
     "browser_list_pages": Arguments,
     "browser_select_page": SelectArguments,
+    "browser_navigate": NavigateArguments,
+    "browser_scroll": ScrollArguments,
     "browser_snapshot": SnapshotArguments,
     "browser_action": ActionArguments,
     "network_query": TrafficArguments,
@@ -69,6 +84,8 @@ DESCRIPTIONS = {
     "browser_status": "Estado do transporte e da captura, sem conectar automaticamente.",
     "browser_list_pages": "Lista abas e frames disponíveis no Chrome conectado.",
     "browser_select_page": "Seleciona explicitamente uma aba e a traz para frente.",
+    "browser_navigate": "Navega a aba ativa ou especificada para uma URL com estratégia de espera.",
+    "browser_scroll": "Rola a página ou container (up, down, top, bottom) para lazy-load ou infinite scroll.",
     "browser_snapshot": "Snapshot versionado, incluindo frames e Shadow DOM aberto.",
     "browser_action": "Executa Locator e retorna observação posterior; não repete a ação automaticamente.",
     "network_query": "Últimos exchanges HTTP redigidos com status e response headers.",
@@ -145,6 +162,10 @@ class ApplicationServices:
             return await self.session.list_pages()
         if name == "browser_select_page":
             return await self.session.select_page(**args)
+        if name == "browser_navigate":
+            return await self.session.navigate(**args)
+        if name == "browser_scroll":
+            return await self.session.scroll(**args)
         if name == "browser_snapshot":
             return await self.observations.snapshot(**args)
         if name == "browser_action":

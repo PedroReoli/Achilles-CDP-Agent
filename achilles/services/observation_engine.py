@@ -63,7 +63,12 @@ EXTRACT = r"""({key, attribute, limit}) => {
             let ref = state.nodes.get(el);
             if (!ref) { ref = state.epoch + '_' + (++state.counter); state.nodes.set(el, ref); el.setAttribute(attribute, ref); }
             const name = nameOf(el).replace(/\s+/g,' ').trim().slice(0,200);
+            const testId = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-automation-id') || (el.id ? '#' + el.id : null);
+            const ariaLabel = el.getAttribute('aria-label');
+            const selectorHint = testId ? (testId.startsWith('#') ? testId : `[data-testid="${testId}"]`) : (ariaLabel ? `[aria-label="${ariaLabel.slice(0, 40)}"]` : (name ? `${el.localName}:has-text("${name.slice(0, 30)}")` : el.localName));
             result.push({node_ref:ref, role, name, tag:el.localName, type:el.type || '',
+                selector_hint: selectorHint,
+                test_id: testId,
                 disabled:el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true',
                 checked:el.hasAttribute('aria-checked') ? el.getAttribute('aria-checked') : (typeof el.checked === 'boolean' ? el.checked : null),
                 expanded:el.getAttribute('aria-expanded'), selected:el.getAttribute('aria-selected'),
@@ -173,6 +178,7 @@ class ObservationEngine:
                 item["locator"] = {
                     "strategy": "css",
                     "selector": f'[{self.attribute}="{node_ref}"]',
+                    "selector_hint": item.get("selector_hint", ""),
                 }
                 elements.append(item)
             if len(elements) >= limit:
