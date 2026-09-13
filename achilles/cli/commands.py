@@ -1,20 +1,36 @@
-"""Comandos CLI e REPL Interativo do Achilles CDP Agent."""
+"""Comandos CLI e REPL Interativo do Achilles CDP Agent com Tema Roxo e Suporte a Slash Commands."""
 
 import asyncio
 import json
+import os
+import socket
+import subprocess
 import sys
+import time
 from typing import Any, Dict, Optional
 
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
+        # Habilitar ANSI no Windows CMD
+        os.system("")
     except Exception:
         pass
 
+# Paleta de Cores Reoli / Purple Theme
+P_BOLD = "\033[1;38;2;192;132;252m"   # Roxo Claro Brilhante
+P_MAIN = "\033[38;2;168;85;247m"     # Roxo Principal Reoli
+P_DARK = "\033[38;2;126;34;206m"     # Roxo Escuro
+CYAN = "\033[38;2;56;189;248m"        # Ciano
+GREEN = "\033[38;2;74;222;128m"      # Verde Sucesso
+YELLOW = "\033[38;2;250;204;21m"     # Amarelo Alerta
+GRAY = "\033[38;2;156;163;175m"       # Cinza / Dim
+RESET = "\033[0m"                     # Reset
+
 
 def _print_banner():
-    print("""
+    banner = f"""{P_MAIN}
  ▄▄▄       ▄████▄   ██░ ██  ██▓ ██▓     ██▓    ▓█████   ██████ 
 ▒████▄    ▒██▀ ▀█  ▓██░ ██▒▓██▒▓██▒    ▓██▒    ▓█   ▀ ▒██    ▒ 
 ▒██  ▀█▄  ▒▓█    ▄ ▒██▀▀██░▒██▒▒██░    ▒██░    ▒███   ░ ▓██▄   
@@ -24,9 +40,52 @@ def _print_banner():
   ▒   ▒▒ ░  ░  ▒    ▒ ░▒░ ░ ▒ ░░ ░ ▒  ░░ ░ ▒  ░ ░ ░  ░░ ░▒  ░ ░
   ░   ▒   ░         ░  ░░ ░ ▒ ░  ░ ░     ░ ░        ░  ░  ░  ░  
       ░  ░░ ░       ░  ░  ░ ░      ░  ░    ░  ░     ░        ░  
-          ░                                                     
-      Achilles CDP Agent — Autonomous Browser Automation & Security
-""")
+          ░                                                     {RESET}
+      {P_BOLD}Achilles CDP Agent{RESET} — {GRAY}Autonomous Browser Automation & Security{RESET}
+"""
+    print(banner)
+
+
+def ensure_chrome_running(cdp_port: int):
+    import tempfile
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
+                return None
+    except Exception:
+        pass
+
+    possible_paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ]
+    chrome_bin = next((p for p in possible_paths if os.path.exists(p)), None)
+    if chrome_bin:
+        print(f"{YELLOW}[*]{RESET} Chrome CDP não detectado na porta {cdp_port}.")
+        print(f"{P_MAIN}[*]{RESET} Iniciando Google Chrome com depuração na porta {cdp_port}...")
+        pdir = os.path.join(tempfile.gettempdir(), f"achilles_profile_{cdp_port}")
+        proc = subprocess.Popen([
+            chrome_bin,
+            f"--remote-debugging-port={cdp_port}",
+            f"--user-data-dir={pdir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "about:blank"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        for _ in range(25):
+            time.sleep(0.2)
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.2)
+                    if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
+                        break
+            except Exception:
+                pass
+        return proc
+    return None
 
 
 async def run_status(cdp_port: int) -> None:
@@ -34,12 +93,12 @@ async def run_status(cdp_port: int) -> None:
     services = ApplicationServices(cdp_port)
     try:
         status = await services.call("browser_status", {})
-        print("\n--- [ACHILLES CDP STATUS] ---")
-        print(f"CDP URL:          {status.get('cdp_url')}")
-        print(f"Modo:             {status.get('mode')}")
-        print(f"Geração:          {status.get('generation')}")
-        print(f"Reqs Gravadas:    {status.get('recorded_requests')}")
-        print(f"Eventos Dropados: {status.get('dropped_events')}")
+        print(f"\n{P_BOLD}--- [ACHILLES CDP STATUS] ---{RESET}")
+        print(f"{P_MAIN}CDP URL:{RESET}          {status.get('cdp_url')}")
+        print(f"{P_MAIN}Modo:{RESET}             {status.get('mode')}")
+        print(f"{P_MAIN}Geração:{RESET}          {status.get('generation')}")
+        print(f"{P_MAIN}Reqs Gravadas:{RESET}    {status.get('recorded_requests')}")
+        print(f"{P_MAIN}Eventos Dropados:{RESET} {status.get('dropped_events')}")
     finally:
         await services.close()
 
@@ -51,15 +110,15 @@ async def run_pages(cdp_port: int) -> None:
         res = await services.call("browser_list_pages", {})
         pages = res.get("pages", [])
         active_id = res.get("active_page_id")
-        print(f"\n--- [PÁGINAS / ABAS DISPONÍVEIS ({len(pages)})] ---")
+        print(f"\n{P_BOLD}--- [ABAS DO NAVEGADOR ({len(pages)})] ---{RESET}")
         if not pages:
-            print("Nenhuma aba detectada. Certifique-se de que o Chrome está rodando com --remote-debugging-port.")
+            print(f"{YELLOW}Nenhuma aba detectada. Digite '/open https://site.com' para abrir uma.{RESET}")
             return
         for idx, p in enumerate(pages, start=1):
-            is_active = " [ATIVA]" if p.get("page_id") == active_id else ""
-            print(f"[{idx}] ID: {p['page_id']}{is_active}")
+            is_active = f" {GREEN}[ATIVA]{RESET}" if p.get("page_id") == active_id else ""
+            print(f"{P_MAIN}[{idx}]{RESET} ID: {P_BOLD}{p['page_id']}{RESET}{is_active}")
             print(f"    Título: {p.get('title', '(Sem título)')}")
-            print(f"    URL:    {p.get('url', 'about:blank')}")
+            print(f"    URL:    {CYAN}{p.get('url', 'about:blank')}{RESET}")
     finally:
         await services.close()
 
@@ -72,12 +131,12 @@ async def run_snapshot(cdp_port: int, page_id: Optional[str] = None, limit: int 
         if page_id:
             args["page_id"] = page_id
         res = await services.call("browser_snapshot", args)
-        print(f"\n--- [SNAPSHOT SEMÂNTICO (ID: {res.get('snapshot_id')})] ---")
-        print(f"Página: {res.get('page_id')} | Total Elementos: {len(res.get('elements', []))}")
-        print("\n[Elementos Interativos]:")
+        print(f"\n{P_BOLD}--- [SNAPSHOT SEMÂNTICO (ID: {res.get('snapshot_id')})] ---{RESET}")
+        print(f"{GRAY}Página: {res.get('page_id')} | Total Elementos: {len(res.get('elements', []))}{RESET}")
+        print(f"\n{P_MAIN}[Elementos Interativos]:{RESET}")
         for line in res.get("compact", "").split("\n"):
             if line.strip():
-                print(f"  {line}")
+                print(f"  {CYAN}{line}{RESET}")
     finally:
         await services.close()
 
@@ -86,7 +145,6 @@ async def run_act(cdp_port: int, action: str, element_ref: str, value: Optional[
     from achilles.services.application import ApplicationServices
     services = ApplicationServices(cdp_port)
     try:
-        # Obter snapshot mais recente para pegar o snapshot_id
         args_snap: Dict[str, Any] = {"limit": 200}
         if page_id:
             args_snap["page_id"] = page_id
@@ -102,9 +160,9 @@ async def run_act(cdp_port: int, action: str, element_ref: str, value: Optional[
         if value is not None:
             args_act["value"] = value
 
-        print(f"\n[*] Executando '{action}' em [{element_ref}] na página {snap['page_id']}...")
+        print(f"\n{P_MAIN}[*]{RESET} Executando '{action}' em [{element_ref}] na página {snap['page_id']}...")
         res = await services.call("browser_action", args_act)
-        print(f"[+] Status: {res.get('status')} | Duração: {res.get('duration_ms', 0)}ms")
+        print(f"{GREEN}[+]{RESET} Status: {res.get('status')} | Duração: {res.get('duration_ms', 0)}ms")
     finally:
         await services.close()
 
@@ -118,22 +176,22 @@ async def run_traffic(cdp_port: int, page_id: Optional[str] = None, limit: int =
             args["page_id"] = page_id
         res = await services.call("network_query", args)
         records = res.get("records", [])
-        print(f"\n--- [HISTÓRICO DE TRÁFEGO ({len(records)} itens)] ---")
+        print(f"\n{P_BOLD}--- [HISTÓRICO DE TRÁFEGO ({len(records)} itens)] ---{RESET}")
         for r in records:
             status = r.get("status") or "PEND"
-            dur = f"{r.get('duration_ms', 0)}ms"
-            print(f"[{r.get('request_id')}] [{r.get('method')}] {r.get('url')} (Status: {status}, {dur})")
+            status_color = GREEN if str(status).startswith("2") else (YELLOW if str(status).startswith("3") else P_MAIN)
+            print(f"[{r.get('request_id')}] [{r.get('method')}] {CYAN}{r.get('url')}{RESET} (Status: {status_color}{status}{RESET}, {r.get('duration_ms', 0)}ms)")
     finally:
         await services.close()
 
 
-async def run_curl(cdp_port: int, request_id: str, shell: str = "posix") -> None:
+async def run_curl(cdp_port: int, request_id: str, shell: str = "powershell") -> None:
     from achilles.services.application import ApplicationServices
     services = ApplicationServices(cdp_port)
     try:
         res = await services.call("network_curl", {"request_id": request_id, "shell": shell})
-        print(f"\n--- [CURL EXPORT ({shell.upper()})] ---")
-        print(res.get("curl"))
+        print(f"\n{P_BOLD}--- [CURL EXPORT ({shell.upper()})] ---{RESET}")
+        print(f"{P_MAIN}{res.get('curl')}{RESET}")
     finally:
         await services.close()
 
@@ -148,63 +206,55 @@ async def run_audit(cdp_port: int, page_id: Optional[str] = None) -> None:
         res = await services.call("security_audit", args)
         score = res.get("security_score")
         score_str = f"{score}/100" if score is not None else "N/A"
-        print(f"\n--- [AUDITORIA DE SEGURANÇA OWASP (Score: {score_str})] ---")
-        print(f"URL: {res.get('url')}")
+        print(f"\n{P_BOLD}--- [AUDITORIA DE SEGURANÇA OWASP (Score: {score_str})] ---{RESET}")
+        print(f"{GRAY}URL: {res.get('url')}{RESET}")
         findings = res.get("findings", [])
         print(f"Total de Achados: {len(findings)}\n")
         for f in findings:
-            print(f"  • [{f.get('severity', 'info').upper()}] {f.get('title')}")
+            sev = f.get('severity', 'info').upper()
+            sev_color = YELLOW if sev in ("HIGH", "CRITICAL") else (CYAN if sev == "MEDIUM" else GRAY)
+            print(f"  • {sev_color}[{sev}]{RESET} {P_BOLD}{f.get('title')}{RESET}")
             if f.get('description'):
-                print(f"    Descrição: {f.get('description')}")
+                print(f"    {GRAY}Descrição:{RESET} {f.get('description')}")
             if f.get('remediation'):
-                print(f"    Correção:  {f.get('remediation')}")
+                print(f"    {GREEN}Correção:{RESET}  {f.get('remediation')}")
     finally:
         await services.close()
-
-
-def ensure_chrome_running(cdp_port: int):
-    import os
-    import socket
-    import subprocess
-    import time
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
-                return None
-    except Exception:
-        pass
-    
-    possible_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-    ]
-    chrome_bin = next((p for p in possible_paths if os.path.exists(p)), None)
-    if chrome_bin:
-        print(f"[*] Chrome CDP não detectado na porta {cdp_port}.")
-        print(f"[*] Iniciando Google Chrome com depuração na porta {cdp_port}...")
-        proc = subprocess.Popen([chrome_bin, f"--remote-debugging-port={cdp_port}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2.0)
-        return proc
-    return None
 
 
 async def run_interactive(cdp_port: int) -> None:
     from achilles.services.application import ApplicationServices
     _print_banner()
-    spawned_proc = ensure_chrome_running(cdp_port)
-    print(f"Conectando ao Chrome CDP na porta {cdp_port}...")
+    ensure_chrome_running(cdp_port)
+    print(f"{P_MAIN}Conectando ao Chrome CDP na porta {cdp_port}...{RESET}")
+    
     services = ApplicationServices(cdp_port)
     current_page_id: Optional[str] = None
     latest_snapshot: Optional[Dict[str, Any]] = None
 
-    print("\n[✓] Modo Interativo do Achilles iniciado!")
-    print("    Digite 'help' para ver os comandos ou 'exit' para sair.\n")
+    # Tenta detectar abas abertas de imediato
+    try:
+        res_pages = await services.call("browser_list_pages", {})
+        pages = res_pages.get("pages", [])
+        if pages:
+            current_page_id = res_pages.get("active_page_id") or pages[0]["page_id"]
+        else:
+            # Abre uma aba inicial automaticamente se não houver nenhuma
+            try:
+                page_id, page_obj = await services.session.page()
+                current_page_id = page_id
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    print(f"\n{GREEN}[✓]{RESET} {P_BOLD}Modo Interativo do Achilles iniciado!{RESET}")
+    print(f"{GRAY}    Digite {P_BOLD}/help{RESET}{GRAY} para ver os comandos ou {P_BOLD}/exit{RESET}{GRAY} para sair.{RESET}\n")
+
     try:
         while True:
             try:
-                prompt_label = f"achilles ({current_page_id or 'sem aba'})> "
+                prompt_label = f"{P_MAIN}achilles{RESET} ({CYAN}{current_page_id or 'sem aba'}{RESET}){P_BOLD}>{RESET} "
                 raw = await asyncio.to_thread(input, prompt_label)
             except (EOFError, KeyboardInterrupt):
                 break
@@ -214,81 +264,79 @@ async def run_interactive(cdp_port: int) -> None:
                 continue
             
             parts = line.split()
-            cmd = parts[0].lower()
+            # Suporta comando com ou sem barra (ex: /help ou help, /pages ou pages)
+            raw_cmd = parts[0].lower()
+            cmd = raw_cmd[1:] if raw_cmd.startswith("/") else raw_cmd
             args = parts[1:]
 
             if cmd in ("exit", "quit", "q"):
                 break
-            elif cmd == "help":
-                print("""
-Comandos Disponíveis:
-  status                     Mostra o status da conexão CDP e estatísticas
-  pages                      Lista todas as abas abertas no navegador
-  select <page_id>           Seleciona e foca uma aba específica
-  goto <url>                 Navega a aba atual para uma URL
-  snapshot                   Captura a árvore de elementos interativos
-  click <ref>                Clica em um elemento pelo [ref] do snapshot
-  fill <ref> <texto>         Digita texto em um campo pelo [ref]
-  traffic [limit]            Lista o histórico de requisições de rede
-  curl <req_id>              Gera o comando cURL seguro da requisição
-  audit                      Executa auditoria de postura de segurança OWASP
-  clear                      Limpa a tela do terminal
-  exit                       Encerra o modo interativo
+            elif cmd in ("help", "h", "?"):
+                print(f"""
+{P_BOLD}Comandos Disponíveis (Use com ou sem '/'):{RESET}
+  {P_MAIN}/pages{RESET}                     Lista todas as abas abertas no navegador
+  {P_MAIN}/open <url>{RESET}                Abre uma nova aba com a URL indicada
+  {P_MAIN}/goto <url>{RESET}                Navega a aba atual para uma URL
+  {P_MAIN}/select <page_id>{RESET}          Seleciona e foca uma aba específica
+  {P_MAIN}/snapshot{RESET} (ou /snap)        Captura a árvore de elementos interativos
+  {P_MAIN}/click <ref>{RESET}                Clica em um elemento pelo [ref] do snapshot
+  {P_MAIN}/fill <ref> <texto>{RESET}         Digita texto em um campo pelo [ref]
+  {P_MAIN}/traffic [limit]{RESET}            Lista o histórico de requisições de rede
+  {P_MAIN}/curl <req_id>{RESET}              Gera o comando cURL seguro da requisição
+  {P_MAIN}/audit{RESET}                      Executa auditoria de postura de segurança OWASP
+  {P_MAIN}/status{RESET}                     Mostra o status da conexão CDP e métricas
+  {P_MAIN}/clear{RESET}                      Limpa a tela do terminal
+  {P_MAIN}/exit{RESET}                       Encerra o modo interativo
 """)
             elif cmd == "clear":
-                import os
                 os.system("cls" if os.name == "nt" else "clear")
             elif cmd == "status":
                 status = await services.call("browser_status", {})
-                print(f"[STATUS] CDP: {status.get('cdp_url')} | Generation: {status.get('generation')} | Reqs: {status.get('recorded_requests')}")
+                print(f"{P_BOLD}[STATUS]{RESET} CDP: {status.get('cdp_url')} | Generation: {status.get('generation')} | Reqs: {status.get('recorded_requests')}")
             elif cmd == "pages":
                 res = await services.call("browser_list_pages", {})
                 pages = res.get("pages", [])
-                print(f"Abas abertas ({len(pages)}):")
+                print(f"{P_BOLD}Abas abertas ({len(pages)}):{RESET}")
                 for p in pages:
-                    mark = " *" if p["page_id"] == current_page_id else ""
-                    print(f"  [{p['page_id']}]{mark} {p.get('title', '')} -> {p.get('url')}")
+                    mark = f" {GREEN}*{RESET}" if p["page_id"] == current_page_id else ""
+                    print(f"  [{P_MAIN}{p['page_id']}{RESET}]{mark} {p.get('title', '')} -> {CYAN}{p.get('url')}{RESET}")
                 if pages and not current_page_id:
                     current_page_id = pages[0]["page_id"]
-                    print(f"[*] Aba ativa definida para: {current_page_id}")
+                    print(f"{P_MAIN}[*]{RESET} Aba ativa definida para: {current_page_id}")
             elif cmd == "select":
                 if not args:
-                    print("Uso: select <page_id>")
+                    print(f"{YELLOW}Uso: /select <page_id>{RESET}")
                     continue
                 target_id = args[0]
                 await services.call("browser_select_page", {"page_id": target_id})
                 current_page_id = target_id
-                print(f"[+] Aba {target_id} selecionada!")
-            elif cmd == "goto":
+                print(f"{GREEN}[+]{RESET} Aba {target_id} selecionada!")
+            elif cmd in ("goto", "open"):
                 if not args:
-                    print("Uso: goto <url>")
+                    print(f"{YELLOW}Uso: /{cmd} <url>{RESET}")
                     continue
                 url = args[0]
                 if not url.startswith("http://") and not url.startswith("https://"):
                     url = "https://" + url
-                if not current_page_id:
-                    res_p = await services.call("browser_list_pages", {})
-                    pages = res_p.get("pages", [])
-                    if pages:
-                        current_page_id = pages[0]["page_id"]
-                    else:
-                        print("[-] Nenhuma aba aberta para navegar.")
-                        continue
+                
+                # Se não há aba, obtém ou cria uma
                 page_id_resolved, page_obj = await services.session.page(current_page_id)
-                print(f"[*] Navegando para {url}...")
+                current_page_id = page_id_resolved
+                print(f"{P_MAIN}[*]{RESET} Navegando para {CYAN}{url}{RESET}...")
                 await page_obj.goto(url, wait_until="domcontentloaded")
-                print(f"[+] Navegação concluída!")
+                print(f"{GREEN}[+]{RESET} Navegação concluída!")
             elif cmd in ("snapshot", "snap"):
                 res_snap = await services.call("browser_snapshot", {"page_id": current_page_id, "limit": 200})
                 latest_snapshot = res_snap
                 current_page_id = res_snap["page_id"]
-                print(f"[+] Snapshot ID: {res_snap['snapshot_id']} (Total: {len(res_snap.get('elements', []))} elementos)")
+                elements = res_snap.get('elements', [])
+                print(f"\n{P_BOLD}[SNAPSHOT {res_snap['snapshot_id']}]{RESET} {GRAY}({len(elements)} elementos){RESET}")
                 for line in res_snap.get("compact", "").split("\n"):
                     if line.strip():
-                        print(f"  {line}")
+                        print(f"  {CYAN}{line}{RESET}")
             elif cmd == "click":
                 if not args:
-                    print("Uso: click <element_ref>")
+                    print(f"{YELLOW}Uso: /click <element_ref>{RESET}")
                     continue
                 if not latest_snapshot:
                     latest_snapshot = await services.call("browser_snapshot", {"page_id": current_page_id, "limit": 200})
@@ -300,10 +348,10 @@ Comandos Disponíveis:
                     "page_id": latest_snapshot["page_id"],
                     "timeout_ms": 5000
                 })
-                print(f"[+] Clique em [{ref}]: {res_act.get('status')}")
+                print(f"{GREEN}[+]{RESET} Clique em [{ref}]: {res_act.get('status')}")
             elif cmd == "fill":
                 if len(args) < 2:
-                    print("Uso: fill <element_ref> <texto a preencher>")
+                    print(f"{YELLOW}Uso: /fill <element_ref> <texto>{RESET}")
                     continue
                 if not latest_snapshot:
                     latest_snapshot = await services.call("browser_snapshot", {"page_id": current_page_id, "limit": 200})
@@ -317,29 +365,32 @@ Comandos Disponíveis:
                     "value": text,
                     "timeout_ms": 5000
                 })
-                print(f"[+] Preenchimento de [{ref}] com '{text}': {res_act.get('status')}")
+                print(f"{GREEN}[+]{RESET} Preenchimento de [{ref}] com '{text}': {res_act.get('status')}")
             elif cmd == "traffic":
                 limit = int(args[0]) if args and args[0].isdigit() else 20
                 res_tr = await services.call("network_query", {"page_id": current_page_id, "limit": limit})
                 records = res_tr.get("records", [])
-                print(f"Tráfego ({len(records)} requisições):")
+                print(f"{P_BOLD}Tráfego ({len(records)} requisições):{RESET}")
                 for r in records:
-                    print(f"  [{r['request_id']}] [{r['method']}] {r['url']} (Status: {r.get('status')})")
+                    st = r.get('status') or 'PEND'
+                    st_c = GREEN if str(st).startswith('2') else (YELLOW if str(st).startswith('3') else P_MAIN)
+                    print(f"  [{P_MAIN}{r['request_id']}{RESET}] [{r['method']}] {CYAN}{r['url']}{RESET} (Status: {st_c}{st}{RESET})")
             elif cmd == "curl":
                 if not args:
-                    print("Uso: curl <request_id>")
+                    print(f"{YELLOW}Uso: /curl <request_id>{RESET}")
                     continue
                 req_id = args[0]
                 res_c = await services.call("network_curl", {"request_id": req_id, "shell": "powershell"})
-                print(f"cURL:\n{res_c.get('curl')}")
+                print(f"{P_BOLD}cURL Export:{RESET}\n{P_MAIN}{res_c.get('curl')}{RESET}")
             elif cmd == "audit":
                 res_aud = await services.call("security_audit", {"page_id": current_page_id})
                 score = res_aud.get("security_score")
-                print(f"\n[AUDITORIA] Score: {score}/100 | URL: {res_aud.get('url')}")
+                print(f"\n{P_BOLD}[AUDITORIA]{RESET} Score: {GREEN}{score}/100{RESET} | URL: {CYAN}{res_aud.get('url')}{RESET}")
                 for f in res_aud.get("findings", []):
-                    print(f"  • [{f.get('severity', 'info').upper()}] {f.get('title')}: {f.get('description')}")
+                    sev = f.get('severity', 'info').upper()
+                    print(f"  • [{sev}] {P_BOLD}{f.get('title')}{RESET}: {f.get('description')}")
             else:
-                print(f"Comando não reconhecido: '{cmd}'. Digite 'help' para ver os comandos.")
+                print(f"{YELLOW}Comando não reconhecido: '{raw_cmd}'. Digite /help para ver os comandos.{RESET}")
     finally:
         await services.close()
-        print("\nSessão interativa encerrada.")
+        print(f"\n{P_MAIN}Sessão interativa do Achilles encerrada.{RESET}")
