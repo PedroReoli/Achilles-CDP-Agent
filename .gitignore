@@ -43,3 +43,12 @@ test-results/
 *.swo
 .DS_Store
 Thumbs.db\n
+# Reoli Governance & System (Ignored)
+\!reoli/
+\!reoli
+\!reoli/
+\!reoli
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+AI.md
