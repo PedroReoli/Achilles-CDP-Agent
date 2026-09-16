@@ -93,6 +93,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     mcp_p = commands.add_parser("mcp", help="Inicia MCP via stdio")
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
+    # 11. Doctor
+    doctor_p = commands.add_parser("doctor", help="Executa testes de integridade e diagnósticos de produção")
+    doctor_p.add_argument("--deep", action="store_true", help="Executa testes de estresse pesados")
+    doctor_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+
     args = parser.parse_args(raw_args)
 
     try:
@@ -140,6 +145,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif args.command == "mcp":
             from achilles.mcp.server import run_mcp_stdio
             asyncio.run(run_mcp_stdio(args.cdp_port))
+        elif args.command == "doctor":
+            from achilles.cli.doctor import run_doctor
+            asyncio.run(run_doctor(args.cdp_port, args.deep))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

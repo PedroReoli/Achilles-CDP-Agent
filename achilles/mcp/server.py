@@ -93,6 +93,11 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
 
     async def write(response: Dict[str, Any]) -> None:
         encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+        # Backpressure / Context Protection
+        if len(encoded) > 1048576:
+            error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
+            encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")
+
         async with output_lock:
             await asyncio.to_thread(sys.stdout.buffer.write, encoded)
             await asyncio.to_thread(sys.stdout.buffer.flush)
