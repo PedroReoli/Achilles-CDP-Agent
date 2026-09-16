@@ -7,13 +7,13 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SENSITIVE = re.compile(
-    r"authorization|cookie|token|secret|password|passwd|api[-_]?key|credential", re.I
+    r"authorization|cookie|token|secret|password|passwd|api[-_]?key|credential|x-api-key|stripe-signature|aws-sigv4", re.I
 )
 ASSIGNMENT = re.compile(
-    r"""(?i)((?:password|passwd|token|secret|api[_-]?key)["']?\s*[:=]\s*["']?)([^\s"'&,;}]+)"""
+    r"""(?i)((?:password|passwd|token|secret|api[_-]?key|stripe-signature|aws-sigv4)["']?\s*[:=]\s*["']?)([^\s"'&,;}]+)"""
 )
 SECRETS = re.compile(
-    r"(?:sbp_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]+|[sr]k_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*)"
+    r"(?:sbp_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]+|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*|AKIA[0-9A-Z]{16})"
 )
 
 
@@ -56,9 +56,35 @@ def redact_url(url: str) -> str:
         return mask(url)
 
 
+import base64
+
 def redact_body(body: str, content_type: str) -> str:
     if "x-www-form-urlencoded" in content_type:
         return urlencode([(k, redact(v, k)) for k, v in parse_qsl(body, keep_blank_values=True)])
     if "multipart/" in content_type:
+        boundary_match = re.search(r"boundary=([\w-]+)", content_type)
+        if boundary_match:
+            boundary = boundary_match.group(1)
+            parts = body.split(boundary)
+            redacted_parts = []
+            for part in parts:
+                if "name=" in part or "filename=" in part:
+                    # Verifica se o campo ou conteúdo bate com nossas chaves
+                    if SENSITIVE.search(part) or SECRETS.search(part):
+                        part = mask(part)
+                redacted_parts.append(part)
+            return boundary.join(redacted_parts)
         return mask(body)
+
+    # Tenta decodificar Base64
+    try:
+        # Verifica se parece Base64 e não tem espaços em branco anômalos
+        if len(body) > 10 and len(body) % 4 == 0 and re.match(r"^[A-Za-z0-9+/]*={0,2}$", body):
+            decoded = base64.b64decode(body).decode('utf-8')
+            redacted_decoded = str(redact(decoded))
+            if redacted_decoded != decoded:
+                return base64.b64encode(redacted_decoded.encode('utf-8')).decode('utf-8')
+    except Exception:
+        pass
+
     return str(redact(body))

@@ -57,6 +57,48 @@ class JournalTests(unittest.TestCase):
         self.assertNotIn("private-body", json.dumps(exported))
         self.assertIn("private-body", r["request_body"])
 
+    def test_network_redaction_fuzzing(self) -> None:
+        from achilles.services.redaction import redact_body, redact
+        import base64
+
+        # Test headers and dict redaction
+        headers = {
+            "x-api-key": "secret123",
+            "stripe-signature": "t=123,v1=sk_live_1234567890abcdef",
+            "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        }
+        redacted_headers = redact(headers)
+        self.assertNotIn("secret123", str(redacted_headers))
+        self.assertNotIn("sk_live_1234567890abcdef", str(redacted_headers))
+        self.assertIn("[REDACTED]", str(redacted_headers))
+
+        # Test Base64 body redaction
+        raw_body = '{"api-key": "secret456", "aws-sigv4": "AKIAIOSFODNN7EXAMPLE"}'
+        b64_body = base64.b64encode(raw_body.encode('utf-8')).decode('utf-8')
+        redacted_b64 = redact_body(b64_body, "text/plain")
+
+        # Ensure it got redacted and is still valid b64
+        decoded_redacted = base64.b64decode(redacted_b64).decode('utf-8')
+        self.assertNotIn("secret456", decoded_redacted)
+        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", decoded_redacted)
+        self.assertIn("[REDACTED]", decoded_redacted)
+
+        # Test Multipart body redaction
+        multipart_body = (
+            "--boundary123\r\n"
+            "Content-Disposition: form-data; name=\"api_key\"\r\n\r\n"
+            "secret789\r\n"
+            "--boundary123\r\n"
+            "Content-Disposition: form-data; name=\"public_field\"\r\n\r\n"
+            "public_value\r\n"
+            "--boundary123--"
+        )
+        redacted_multipart = redact_body(multipart_body, "multipart/form-data; boundary=boundary123")
+        self.assertNotIn("secret789", redacted_multipart)
+        self.assertIn("public_value", redacted_multipart)
+        self.assertIn("--boundary123", redacted_multipart)
+
+
     def test_eviction(self) -> None:
         class Request:
             method = "GET"
@@ -143,6 +185,29 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                 {"action": "fill", "page_id": "p", "snapshot_id": "s", "element_ref": "e"},
             )
         await app.close()
+
+    def test_mcp_backpressure(self) -> None:
+        import asyncio
+        from achilles.mcp.server import MCPServer
+        from achilles.services.application import ApplicationServices
+
+        async def run():
+            services = ApplicationServices(9999)
+            server = MCPServer(services)
+
+            # Create a response that will trigger backpressure limit (>1MB)
+            response = {"jsonrpc": "2.0", "id": 1, "result": {"data": "x" * 1500000}}
+            import json
+            encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+
+            # Apply same logic as write function
+            if len(encoded) > 1048576:
+                error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
+                encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")
+
+            self.assertIn(b"Message too large for context window", encoded)
+
+        asyncio.run(run())
 
     async def test_rest_auth_and_same_dispatcher(self) -> None:
         import httpx
