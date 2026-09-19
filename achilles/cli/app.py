@@ -6,6 +6,15 @@ import os
 import sys
 from typing import Optional, Sequence
 
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def port(value: str) -> int:
     try:
@@ -23,6 +32,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     else:
         raw_args = list(argv)
 
+    # Suporte nativo ao modo autônomo imediato via `achilles --ai`
+    if "--ai" in raw_args:
+        from achilles.cli.commands import run_protocol
+        lang = "pt"
+        if "-l" in raw_args:
+            idx = raw_args.index("-l")
+            if idx + 1 < len(raw_args):
+                lang = raw_args[idx + 1]
+        elif "--lang" in raw_args:
+            idx = raw_args.index("--lang")
+            if idx + 1 < len(raw_args):
+                lang = raw_args[idx + 1]
+        run_protocol(lang=lang)
+        return
+
     # Se chamado sem argumentos (ex: apenas `achilles`), abre o modo interativo por padrão
     if not raw_args:
         raw_args = ["interactive"]
@@ -32,6 +56,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     parser.add_argument("--version", action="version", version="achilles 2.0.0")
     parser.add_argument("--lang", "-l", choices=["pt", "en"], default=None, help="Idioma da interface (pt / en)")
+    parser.add_argument("--ai", action="store_true", help="Exibe o protocolo autônomo para agentes de IA")
 
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -53,10 +78,31 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     snap_p = commands.add_parser("snapshot", aliases=["snap"], help="Captura snapshot semântico e elementos interativos")
     snap_p.add_argument("--page-id", type=str, default=None)
     snap_p.add_argument("--limit", type=int, default=200)
+    snap_p.add_argument("--format", choices=["compact", "json", "markdown"], default="compact")
+    snap_p.add_argument("--viewport-only", action="store_true", default=True)
+    snap_p.add_argument("--no-viewport-only", action="store_false", dest="viewport_only")
+    snap_p.add_argument("--selector", type=str, default=None)
     snap_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     snap_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
-    # 5. Act
+    # 5. Read (Reader Mode)
+    read_p = commands.add_parser("read", aliases=["reader"], help="Lê conteúdo da página em Markdown limpo (Reader Mode, ~95%% economia de tokens)")
+    read_p.add_argument("--page-id", type=str, default=None)
+    read_p.add_argument("--max-length", type=int, default=50000)
+    read_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    read_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
+    # 6. Report
+    report_p = commands.add_parser("report", aliases=["rep"], help="Exibe relatório executivo de economia de tokens e tráfego de rotas")
+    report_p.add_argument("--page-id", type=str, default=None)
+    report_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    report_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
+    # 7. Protocol / AI
+    proto_p = commands.add_parser("protocol", aliases=["ai"], help="Exibe o protocolo autônomo para agentes de IA")
+    proto_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
+    # 8. Act
     act_p = commands.add_parser("act", help="Executa ação (click, fill, hover, press, select)")
     act_p.add_argument("action", choices=["click", "fill", "hover", "press", "select"])
     act_p.add_argument("element_ref", type=str)
@@ -64,44 +110,67 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     act_p.add_argument("--page-id", type=str, default=None)
     act_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
-    # 6. Traffic
+    # 9. Traffic
     traffic_p = commands.add_parser("traffic", help="Lista requisições HTTP capturadas")
     traffic_p.add_argument("--page-id", type=str, default=None)
     traffic_p.add_argument("--limit", type=int, default=50)
     traffic_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     traffic_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
-    # 7. cURL
+    # 10. cURL
     curl_p = commands.add_parser("curl", help="Exporta requisição como comando cURL seguro")
     curl_p.add_argument("request_id", type=str)
     curl_p.add_argument("--shell", choices=["posix", "powershell"], default="powershell" if sys.platform == "win32" else "posix")
     curl_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
-    # 8. Audit
+    # 11. Audit
     audit_p = commands.add_parser("audit", help="Executa auditoria de postura OWASP e segurança")
     audit_p.add_argument("--page-id", type=str, default=None)
     audit_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     audit_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
-    # 9. Start REST API
+    # 12. Start REST API
     start_p = commands.add_parser("start", help="Inicia REST Bridge autenticado em 127.0.0.1")
     start_p.add_argument("--port", "-p", type=port, default=8765)
     start_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     start_p.add_argument("--host", choices=["127.0.0.1"], default="127.0.0.1")
 
-    # 10. MCP stdio
+    # 13. MCP stdio
     mcp_p = commands.add_parser("mcp", help="Inicia MCP via stdio")
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
-    # 11. Doctor
+    # 14. Doctor
     doctor_p = commands.add_parser("doctor", help="Executa testes de integridade e diagnósticos de produção")
     doctor_p.add_argument("--deep", action="store_true", help="Executa testes de estresse pesados")
     doctor_p.add_argument("--cdp-port", "-c", type=port, default=9222)
 
+    # 15. Wait Challenge
+    wc_p = commands.add_parser("wait-challenge", aliases=["challenge", "wait-human"], help="Aguarda resolução cooperativa de Turnstile, CAPTCHA ou 2FA")
+    wc_p.add_argument("--page-id", type=str, default=None)
+    wc_p.add_argument("--timeout", "-t", type=int, default=120)
+    wc_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    wc_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
+    # 16. Domain Memory
+    mem_p = commands.add_parser("memory", aliases=["mem"], help="Gerencia e consulta memória semântica de rotas e autenticação")
+    mem_p.add_argument("domain", nargs="?", default=None, help="Domínio para consulta (ex: github.com)")
+    mem_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    mem_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
+    # 17. Export HTML Report
+    exp_p = commands.add_parser("export-report", aliases=["export", "dashboard"], help="Gera e exporta dashboard HTML standalone da sessão")
+    exp_p.add_argument("--output", "-o", type=str, default="achilles_session_report.html", help="Caminho do arquivo HTML")
+    exp_p.add_argument("--page-id", type=str, default=None)
+    exp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    exp_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
     args = parser.parse_args(raw_args)
 
     try:
-        if args.command in ("interactive", "i", "repl"):
+        if getattr(args, "ai", False) or args.command in ("protocol", "ai"):
+            from achilles.cli.commands import run_protocol
+            run_protocol(getattr(args, "lang", None))
+        elif args.command in ("interactive", "i", "repl"):
             from achilles.cli.commands import run_interactive
             asyncio.run(run_interactive(args.cdp_port, getattr(args, "lang", None)))
         elif args.command == "status":
@@ -115,7 +184,38 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif args.command in ("snapshot", "snap"):
             from achilles.cli.commands import run_snapshot
             from achilles.cli.i18n import I18n
-            asyncio.run(run_snapshot(args.cdp_port, I18n(getattr(args, "lang", None)), args.page_id, args.limit))
+            asyncio.run(
+                run_snapshot(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.page_id,
+                    args.limit,
+                    format=getattr(args, "format", "compact"),
+                    in_viewport_only=getattr(args, "viewport_only", True),
+                    selector=getattr(args, "selector", None),
+                )
+            )
+        elif args.command in ("read", "reader"):
+            from achilles.cli.commands import run_read
+            from achilles.cli.i18n import I18n
+            asyncio.run(
+                run_read(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.page_id,
+                    args.max_length,
+                )
+            )
+        elif args.command in ("report", "rep"):
+            from achilles.cli.commands import run_report
+            from achilles.cli.i18n import I18n
+            asyncio.run(
+                run_report(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.page_id,
+                )
+            )
         elif args.command == "act":
             from achilles.cli.commands import run_act
             asyncio.run(run_act(args.cdp_port, args.action, args.element_ref, args.value, args.page_id))
@@ -148,6 +248,41 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif args.command == "doctor":
             from achilles.cli.doctor import run_doctor
             asyncio.run(run_doctor(args.cdp_port, args.deep))
+        elif args.command in ("wait-challenge", "challenge", "wait-human"):
+            from achilles.cli.commands import run_wait_challenge
+            from achilles.cli.i18n import I18n
+
+            asyncio.run(
+                run_wait_challenge(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.page_id,
+                    args.timeout,
+                )
+            )
+        elif args.command in ("memory", "mem"):
+            from achilles.cli.commands import run_domain_memory
+            from achilles.cli.i18n import I18n
+
+            asyncio.run(
+                run_domain_memory(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.domain,
+                )
+            )
+        elif args.command in ("export-report", "export", "dashboard"):
+            from achilles.cli.commands import run_export_report
+            from achilles.cli.i18n import I18n
+
+            asyncio.run(
+                run_export_report(
+                    args.cdp_port,
+                    I18n(getattr(args, "lang", None)),
+                    args.page_id,
+                    args.output,
+                )
+            )
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

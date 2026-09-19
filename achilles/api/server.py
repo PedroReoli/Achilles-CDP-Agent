@@ -71,15 +71,25 @@ def create_app(
         finally:
             await app.state.services.close()
 
-    app = FastAPI(title="Achilles CDP Agent", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Achilles CDP Agent",
+        version="2.0.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
     app.add_middleware(BodyLimit)
 
     @app.middleware("http")
     async def local_only(request: Request, call_next: Any) -> Any:
         try:
             peer = ipaddress.ip_address(request.client.host if request.client else "0.0.0.0")
-            host = request.headers.get("host", "").split(":", 1)[0]
-            permitted = peer.is_loopback and host in ("127.0.0.1", "localhost")
+            raw_host = request.headers.get("host", "")
+            if raw_host.startswith("["):
+                host = raw_host.split("]", 1)[0].lstrip("[")
+            else:
+                host = raw_host.split(":", 1)[0]
+            permitted = peer.is_loopback and host in ("127.0.0.1", "localhost", "::1")
         except ValueError:
             permitted = False
         if not permitted:
@@ -117,13 +127,49 @@ def create_app(
     async def status(request: Request) -> Dict[str, Any]:
         return await request.app.state.services.call("browser_status", {})
 
+    @app.get("/api/pages")
+    async def pages(request: Request) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_list_pages", {})
+
+    @app.post("/api/pages/new")
+    async def new_page(request: Request, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_new_tab", body or {})
+
+    @app.delete("/api/pages/{page_id}")
+    async def close_page(page_id: str, request: Request) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_close_tab", {"page_id": page_id})
+
     @app.get("/api/dom/tree")
     async def tree(
-        request: Request, page_id: Optional[str] = None, limit: int = 200
+        request: Request,
+        page_id: Optional[str] = None,
+        limit: int = 200,
+        format: str = "compact",
+        in_viewport_only: bool = True,
+        selector: Optional[str] = None,
     ) -> Dict[str, Any]:
         return await request.app.state.services.call(
-            "browser_snapshot", {"page_id": page_id, "limit": limit}
+            "browser_snapshot",
+            {
+                "page_id": page_id,
+                "limit": limit,
+                "format": format,
+                "in_viewport_only": in_viewport_only,
+                "selector": selector,
+            },
         )
+
+    @app.get("/api/read")
+    async def read(
+        request: Request, page_id: Optional[str] = None, max_length: int = 50000
+    ) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "browser_read_content", {"page_id": page_id, "max_length": max_length}
+        )
+
+    @app.get("/api/report")
+    async def report(request: Request, page_id: Optional[str] = None) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_report", {"page_id": page_id})
 
     @app.get("/api/security/audit")
     async def audit(request: Request, page_id: Optional[str] = None) -> Dict[str, Any]:
@@ -146,5 +192,34 @@ def create_app(
         return await request.app.state.services.call(
             "browser_action", {**arguments, "action": action}
         )
+
+    @app.post("/api/challenge/wait")
+    async def wait_challenge(
+        request: Request, body: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return await request.app.state.services.call("browser_wait_for_challenge", body or {})
+
+    @app.get("/api/memory")
+    async def get_memory(request: Request, domain: Optional[str] = None) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "browser_domain_memory",
+            {"operation": "get", "domain": domain} if domain else {"operation": "list"},
+        )
+
+    @app.post("/api/memory")
+    async def remember_memory(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
+        return await request.app.state.services.call(
+            "browser_domain_memory",
+            {"operation": "remember", **body},
+        )
+
+    @app.get("/api/report/html")
+    async def report_html(request: Request, page_id: Optional[str] = None) -> Any:
+        from fastapi.responses import HTMLResponse
+
+        res = await request.app.state.services.call(
+            "browser_export_html_report", {"page_id": page_id}
+        )
+        return HTMLResponse(content=res["html"])
 
     return app

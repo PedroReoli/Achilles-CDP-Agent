@@ -95,8 +95,22 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
         encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
         # Backpressure / Context Protection
         if len(encoded) > 1048576:
-            error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
-            encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")
+            truncated_ok = False
+            result = response.get("result")
+            if isinstance(result, dict) and "structuredContent" in result:
+                sc = result["structuredContent"]
+                if isinstance(sc, dict) and "elements" in sc and isinstance(sc["elements"], list):
+                    orig_len = len(sc["elements"])
+                    sc["elements"] = [e for e in sc["elements"] if e.get("in_viewport")] or sc["elements"][:max(20, orig_len // 4)]
+                    sc["truncated_by_context_limit"] = True
+                    result["content"] = [{"type": "text", "text": json.dumps(sc, ensure_ascii=False)}]
+                    encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+                    if len(encoded_candidate) <= 1048576:
+                        encoded = encoded_candidate
+                        truncated_ok = True
+            if not truncated_ok:
+                error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
+                encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")
 
         async with output_lock:
             await asyncio.to_thread(sys.stdout.buffer.write, encoded)
@@ -115,9 +129,11 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
                         request_id, -32800, "Request cancelled; observe state before retrying"
                     )
                 )
-        except Exception:
+        except Exception as exc:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
             if "id" in request:
-                await write(server.error(request_id, -32603, "Internal error"))
+                await write(server.error(request_id, -32603, f"Internal error: {type(exc).__name__}"))
         finally:
             if isinstance(request_id, (str, int)):
                 pending.pop(request_id, None)

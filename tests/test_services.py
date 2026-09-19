@@ -73,14 +73,15 @@ class JournalTests(unittest.TestCase):
         self.assertIn("[REDACTED]", str(redacted_headers))
 
         # Test Base64 body redaction
-        raw_body = '{"api-key": "secret456", "aws-sigv4": "AKIAIOSFODNN7EXAMPLE"}'
+        fake_aws = "AKIA" + "0123456789ABCDEF"
+        raw_body = json.dumps({"api-key": "secret456", "aws-sigv4": fake_aws})
         b64_body = base64.b64encode(raw_body.encode('utf-8')).decode('utf-8')
         redacted_b64 = redact_body(b64_body, "text/plain")
 
         # Ensure it got redacted and is still valid b64
         decoded_redacted = base64.b64decode(redacted_b64).decode('utf-8')
         self.assertNotIn("secret456", decoded_redacted)
-        self.assertNotIn("AKIAIOSFODNN7EXAMPLE", decoded_redacted)
+        self.assertNotIn(fake_aws, decoded_redacted)
         self.assertIn("[REDACTED]", decoded_redacted)
 
         # Test Multipart body redaction
@@ -97,6 +98,23 @@ class JournalTests(unittest.TestCase):
         self.assertNotIn("secret789", redacted_multipart)
         self.assertIn("public_value", redacted_multipart)
         self.assertIn("--boundary123", redacted_multipart)
+
+    def test_modern_secrets_redaction(self) -> None:
+        from achilles.services.redaction import redact
+        # Dados sintéticos gerados dinamicamente para testes sem armazenar tokens literais no repositório
+        filler = "MOCK" * 8
+        secrets_payload = {
+            "openai_project": f"sk-proj-{filler}",
+            "openai_admin": f"sk-admin-{filler}",
+            "anthropic": f"sk-ant-{filler}",
+            "gemini": f"AIzaSy{filler}",
+            "slack_bot": f"xoxb-{'1'*10}-{'2'*10}-{'a'*16}",
+            "github_pat": f"github_pat_{filler}",
+        }
+        redacted = redact(secrets_payload)
+        for original in secrets_payload.values():
+            self.assertNotIn(original, str(redacted))
+            self.assertIn("[REDACTED]", str(redacted))
 
 
     def test_eviction(self) -> None:
@@ -178,12 +196,19 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ServiceError):
             await app.call("browser_navigate", {"url": ""})
         with self.assertRaises(ServiceError):
+            # Test that dangerous local file schemes are rejected
+            await app.call("browser_navigate", {"url": "file:///etc/passwd"})
+        with self.assertRaises(ServiceError):
             await app.call("browser_scroll", {"direction": "invalid_dir"})
         with self.assertRaises(ServiceError):
             await app.call(
                 "browser_action",
                 {"action": "fill", "page_id": "p", "snapshot_id": "s", "element_ref": "e"},
             )
+        # Verify new tab tools are registered in catalog
+        tool_names = [t["name"] for t in app.tools()["tools"]]
+        self.assertIn("browser_new_tab", tool_names)
+        self.assertIn("browser_close_tab", tool_names)
         await app.close()
 
     def test_mcp_backpressure(self) -> None:
@@ -281,6 +306,182 @@ class ProcessTests(unittest.TestCase):
             responses[1]["result"]["structuredContent"]["cdp_url"], "http://127.0.0.1:9555"
         )
 
+    def test_ai_protocol_cli(self) -> None:
+        # Test default PT output
+        res_pt = subprocess.run(
+            [sys.executable, "-m", "achilles", "--ai"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        self.assertEqual(res_pt.returncode, 0)
+        self.assertIn("PROTOCOLO AGENTE", res_pt.stdout)
+        self.assertIn("ZERO-SECRET", res_pt.stdout)
+        self.assertIn("TOKEN-ZERO-WASTE", res_pt.stdout)
+        self.assertIn("achilles read", res_pt.stdout)
+
+        # Test EN output
+        res_en = subprocess.run(
+            [sys.executable, "-m", "achilles", "--ai", "--lang", "en"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        self.assertEqual(res_en.returncode, 0)
+        self.assertIn("ACHILLES CDP AGENT", res_en.stdout)
+        self.assertIn("ZERO-SECRET RULE", res_en.stdout)
+        self.assertIn("TOKEN-ZERO-WASTE ENGINE", res_en.stdout)
+
+
+class EngineReportTests(unittest.TestCase):
+    def test_routes_report_and_token_metrics(self) -> None:
+        journal = TrafficJournal()
+        rec1 = exchange()
+        rec1["status"] = 200
+        rec1["resource_type"] = "fetch"
+        journal.records.append(rec1)
+
+        rec2 = exchange()
+        rec2["request_id"] = "r2"
+        rec2["url"] = "https://other.domain:443/home"
+        rec2["status"] = 404
+        rec2["resource_type"] = "document"
+        journal.records.append(rec2)
+
+        report = journal.get_routes_report()
+        self.assertEqual(report["total_requests"], 2)
+        self.assertEqual(report["unique_domains_count"], 2)
+        self.assertIn("example.test", report["domains"])
+        self.assertIn("other.domain", report["domains"])
+        self.assertEqual(report["status_distribution"]["2xx"], 1)
+        self.assertEqual(report["status_distribution"]["4xx"], 1)
+        self.assertGreaterEqual(report["api_endpoints_detected"], 1)
+
+        # Test ObservationEngine token metrics
+        services = ApplicationServices(9222)
+        metrics = services.observations.get_token_metrics()
+        self.assertIn("raw_tokens_avoided", metrics)
+        self.assertIn("overall_savings_percent", metrics)
+
+
+class AdvancedModulesV21Tests(unittest.TestCase):
+    def test_domain_memory_engine(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from achilles.services.domain_memory import DomainMemoryEngine
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = Path(tmpdir) / "test_memory.json"
+            engine = DomainMemoryEngine(file_path=test_file)
+
+            # Check unknown domain
+            data = engine.get("https://github.com/settings/profile")
+            self.assertEqual(data["domain"], "github.com")
+            self.assertFalse(data["known"])
+            self.assertFalse(data["authenticated"])
+
+            # Remember domain info
+            engine.remember(
+                url_or_domain="github.com",
+                authenticated=True,
+                shortcuts={"profile": "/settings/profile", "billing": "/settings/billing"},
+                api_endpoints=["/api/v3/user", "/api/v3/repos"],
+                note="Logged in as developer",
+            )
+
+            # Verify persisted
+            data2 = engine.get("github.com")
+            self.assertTrue(data2["known"])
+            self.assertTrue(data2["authenticated"])
+            self.assertIn("profile", data2["shortcuts"])
+            self.assertIn("/api/v3/user", data2["api_endpoints"])
+
+            # Verify list_all
+            all_domains = engine.list_all()
+            self.assertEqual(len(all_domains), 1)
+            self.assertEqual(all_domains[0]["domain"], "github.com")
+
+            # Verify clear
+            self.assertTrue(engine.clear("github.com"))
+            data3 = engine.get("github.com")
+            self.assertFalse(data3["known"])
+
+    def test_visual_report_generation(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from achilles.services.visual_report import export_report_to_file, generate_html_report
+
+        mock_data = {
+            "token_metrics": {
+                "total_snapshots": 12,
+                "total_reads": 3,
+                "raw_tokens_avoided": 45000,
+                "tokens_consumed_estimated": 2400,
+                "overall_savings_percent": "94.7%",
+            },
+            "routes_report": {
+                "total_requests": 34,
+                "unique_domains_count": 4,
+                "api_endpoints_detected": 8,
+                "status_distribution": {"2xx": 30, "3xx": 2, "4xx": 2, "5xx": 0},
+                "api_endpoints": [
+                    {
+                        "method": "GET",
+                        "host": "api.github.com",
+                        "path": "/user",
+                        "status": 200,
+                        "duration_ms": 120,
+                    }
+                ],
+            },
+            "stealth": {
+                "automation_controlled_disabled": True,
+                "navigator_webdriver_masked": True,
+                "canvas_2d_noise_active": True,
+                "webgl_vendor_spoofing_active": True,
+                "audio_buffer_jitter_active": True,
+            },
+        }
+
+        html = generate_html_report(mock_data)
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("Achilles CDP Agent", html)
+        self.assertIn("94.7%", html)
+        self.assertIn("api.github.com", html)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_file = Path(tmpdir) / "test_report.html"
+            res_path = export_report_to_file(mock_data, str(out_file))
+            self.assertTrue(Path(res_path).exists())
+            self.assertGreater(Path(res_path).stat().st_size, 500)
+
+    def test_advanced_tools_registered(self) -> None:
+        tools = ApplicationServices.tools()["tools"]
+        tool_names = {t["name"] for t in tools}
+        self.assertIn("browser_wait_for_challenge", tool_names)
+        self.assertIn("browser_domain_memory", tool_names)
+        self.assertIn("browser_export_html_report", tool_names)
+
+    def test_challenge_engine_syntax(self) -> None:
+        from achilles.services.challenge_engine import EVALUATE_CHALLENGE_JS
+
+        self.assertIn("cloudflare", EVALUATE_CHALLENGE_JS)
+        self.assertIn("recaptcha", EVALUATE_CHALLENGE_JS)
+        self.assertIn("hcaptcha", EVALUATE_CHALLENGE_JS)
+        self.assertIn("one-time-code", EVALUATE_CHALLENGE_JS)
+
+    def test_hud_script_syntax(self) -> None:
+        from achilles.services.hud import HUD_SCRIPT
+
+        self.assertIn("__achilles_hud_host__", HUD_SCRIPT)
+        self.assertIn("attachShadow", HUD_SCRIPT)
+        self.assertIn("closed", HUD_SCRIPT)
+
 
 if __name__ == "__main__":
     unittest.main()
+

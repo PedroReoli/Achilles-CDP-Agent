@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -33,7 +34,8 @@ from rich.text import Text
 
 from achilles.cli.i18n import I18n
 
-console = Console(force_terminal=True, color_system="truecolor")
+is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+console = Console(force_terminal=is_tty, color_system="truecolor" if is_tty else None)
 
 ASCII_BANNER = """
  ▄▄▄       ▄████▄   ██░ ██  ██▓ ██▓     ██▓    ▓█████   ██████ 
@@ -51,7 +53,12 @@ ASCII_BANNER = """
 
 def get_chrome_profile_dir() -> Path:
     """Retorna o diretório do perfil persistente do Chrome (salva logins, cookies e sessões)."""
-    base = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Achilles" / "chrome_profile"
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Achilles" / "chrome_profile"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "Achilles" / "chrome_profile"
+    else:
+        base = Path.home() / ".config" / "achilles" / "chrome_profile"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -79,12 +86,30 @@ def ensure_chrome_running(cdp_port: int, i18n: I18n):
     except Exception:
         pass
 
-    possible_paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-    ]
+    possible_paths = []
+    if sys.platform == "win32":
+        possible_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        ]
+    elif sys.platform == "darwin":
+        possible_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    else:
+        for candidate in ("google-chrome", "google-chrome-stable", "chromium-browser", "chromium"):
+            found = shutil.which(candidate)
+            if found:
+                possible_paths.append(found)
+
     chrome_bin = next((p for p in possible_paths if os.path.exists(p)), None)
+    if not chrome_bin and shutil.which("google-chrome"):
+        chrome_bin = shutil.which("google-chrome")
+    if not chrome_bin and shutil.which("chromium"):
+        chrome_bin = shutil.which("chromium")
+
     if chrome_bin:
         profile_dir = get_chrome_profile_dir()
         console.print(f"[yellow][*][/] {i18n.t('chrome_not_detected')} [bold cyan]{cdp_port}[/].")
@@ -97,6 +122,7 @@ def ensure_chrome_running(cdp_port: int, i18n: I18n):
             f"--user-data-dir={str(profile_dir)}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--disable-blink-features=AutomationControlled",
             "about:blank"
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
@@ -146,6 +172,18 @@ def print_help_table(i18n: I18n):
     )
     table.add_row(
         i18n.t("cat_nav"),
+        "/new [url]",
+        "Abre nova aba (opcional: URL)",
+        "/new https://github.com",
+    )
+    table.add_row(
+        i18n.t("cat_nav"),
+        "/close [page_id]",
+        "Fecha aba ativa ou especificada",
+        "/close",
+    )
+    table.add_row(
+        i18n.t("cat_nav"),
         "/scroll [dir/pixels]",
         i18n.t("desc_scroll"),
         "/scroll down 500",
@@ -155,6 +193,12 @@ def print_help_table(i18n: I18n):
         "/snapshot (ou /snap)",
         i18n.t("desc_snap"),
         "/snapshot",
+    )
+    table.add_row(
+        i18n.t("cat_inspect"),
+        "/read [max_length]",
+        i18n.t("desc_read"),
+        "/read",
     )
     table.add_row(
         i18n.t("cat_action"),
@@ -181,10 +225,40 @@ def print_help_table(i18n: I18n):
         "/curl req_987",
     )
     table.add_row(
+        i18n.t("cat_network"),
+        "/report",
+        i18n.t("desc_report"),
+        "/report",
+    )
+    table.add_row(
+        i18n.t("cat_network"),
+        "/export [arquivo.html]",
+        "Exporta dashboard HTML com KPIs e rotas da sessão",
+        "/export relatorio.html",
+    )
+    table.add_row(
+        i18n.t("cat_network"),
+        "/memory [domínio]",
+        "Consulta memória semântica de rotas e APIs",
+        "/memory github.com",
+    )
+    table.add_row(
+        i18n.t("cat_action"),
+        "/wait-human [tempo]",
+        "Aguarda usuário resolver CAPTCHA/2FA no Chrome",
+        "/wait-human 120",
+    )
+    table.add_row(
         i18n.t("cat_security"),
         "/audit",
         i18n.t("desc_audit"),
         "/audit",
+    )
+    table.add_row(
+        i18n.t("cat_system"),
+        "/ai (ou /protocol)",
+        i18n.t("desc_ai"),
+        "/ai",
     )
     table.add_row(
         i18n.t("cat_system"),
@@ -256,7 +330,16 @@ async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: O
             await services.close()
 
 
-async def run_snapshot(cdp_port: int, i18n: I18n, page_id: Optional[str] = None, limit: int = 200, services=None) -> None:
+async def run_snapshot(
+    cdp_port: int,
+    i18n: I18n,
+    page_id: Optional[str] = None,
+    limit: int = 200,
+    format: str = "compact",
+    in_viewport_only: bool = True,
+    selector: Optional[str] = None,
+    services=None,
+) -> None:
     should_close = False
     if services is None:
         from achilles.services.application import ApplicationServices
@@ -264,14 +347,22 @@ async def run_snapshot(cdp_port: int, i18n: I18n, page_id: Optional[str] = None,
         should_close = True
 
     try:
-        args: Dict[str, Any] = {"limit": limit}
+        args: Dict[str, Any] = {
+            "limit": limit,
+            "format": format,
+            "in_viewport_only": in_viewport_only,
+        }
+        if selector:
+            args["selector"] = selector
         if page_id:
             args["page_id"] = page_id
         res = await services.call("browser_snapshot", args)
         elements = res.get("elements", [])
+        saved_pct = res.get("tokens_saved_percent", "")
 
         table = Table(
             title=f"[bold #e9d5ff]{i18n.t('snap_title')} [dim]({len(elements)} {i18n.t('snap_elements_count')})[/][/]",
+            subtitle=f"[bold green]✔ Economia de Tokens: {saved_pct} (Viewport)[/]" if saved_pct else None,
             border_style="#a855f7",
             box=box.ROUNDED,
             header_style="bold #c084fc",
@@ -401,6 +492,333 @@ async def run_audit(cdp_port: int, i18n: I18n, page_id: Optional[str] = None, se
             await services.close()
 
 
+async def run_read(
+    cdp_port: int,
+    i18n: I18n,
+    page_id: Optional[str] = None,
+    max_length: int = 50000,
+    services=None,
+) -> None:
+    should_close = False
+    if services is None:
+        from achilles.services.application import ApplicationServices
+        ensure_chrome_running(cdp_port, i18n)
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        res = await services.call("browser_read_content", {"page_id": page_id, "max_length": max_length})
+        metrics = res.get("metrics", {})
+        saved_pct = metrics.get("tokens_saved_percent", "0%")
+        saved_tokens = max(0, metrics.get("estimated_raw_tokens", 0) - metrics.get("estimated_extracted_tokens", 0))
+
+        header_text = (
+            f"[bold cyan]{res.get('title', 'Sem título')}[/]\n"
+            f"[dim]{res.get('url', '')}[/]\n"
+            f"[bold green]✔ Economia de Tokens: {saved_pct} ({saved_tokens:,} tokens economizados vs HTML bruto)[/]"
+        )
+        console.print(Panel(header_text, title="[bold #c084fc]📖 Reader Mode (Conteúdo Extraído)[/]", border_style="#a855f7", box=box.ROUNDED))
+        console.print(res.get("markdown", ""))
+    finally:
+        if should_close:
+            await services.close()
+
+
+async def run_report(
+    cdp_port: int,
+    i18n: I18n,
+    page_id: Optional[str] = None,
+    services=None,
+) -> None:
+    should_close = False
+    if services is None:
+        from achilles.services.application import ApplicationServices
+        ensure_chrome_running(cdp_port, i18n)
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        rep = await services.call("browser_report", {"page_id": page_id})
+        tm = rep.get("token_metrics", {})
+        rr = rep.get("routes_report", {})
+
+        # Table 1: Token Metrics
+        t_tokens = Table(title="[bold #c084fc]⚡ Token-Zero-Waste & Economia de Custos[/]", border_style="#a855f7", box=box.ROUNDED)
+        t_tokens.add_column("Métrica", style="bold #93c5fd", width=34)
+        t_tokens.add_column("Valor", style="#e2e8f0", width=34)
+        t_tokens.add_row("Snapshots Compactos Executados", str(tm.get("total_snapshots", 0)))
+        t_tokens.add_row("Páginas Lidas em Reader Mode", str(tm.get("total_reads", 0)))
+        t_tokens.add_row("Tokens Brutos Evitados", f"[bold green]{tm.get('raw_tokens_avoided', 0):,}[/]")
+        t_tokens.add_row("Tokens Efetivamente Consumidos", f"{tm.get('tokens_consumed_estimated', 0):,}")
+        t_tokens.add_row("Taxa Global de Economia", f"[bold green]{tm.get('overall_savings_percent', '0%')}[/]")
+        console.print(t_tokens)
+
+        # Table 2: Routes Report
+        t_routes = Table(title="[bold #c084fc]🌐 Rotas & APIs de Rede Analisadas[/]", border_style="#38bdf8", box=box.ROUNDED)
+        t_routes.add_column("Categoria / Métrica", style="bold #93c5fd", width=34)
+        t_routes.add_column("Detalhe", style="#e2e8f0", width=40)
+        t_routes.add_row("Total de Requisições Gravadas", str(rr.get("total_requests", 0)))
+        t_routes.add_row("Domínios Únicos Contactados", str(rr.get("unique_domains_count", 0)))
+        t_routes.add_row("Endpoints de API Detectados", str(rr.get("api_endpoints_detected", 0)))
+        
+        status_dist = rr.get("status_distribution", {})
+        dist_str = f"2xx: [green]{status_dist.get('2xx', 0)}[/] | 3xx: [yellow]{status_dist.get('3xx', 0)}[/] | 4xx: [red]{status_dist.get('4xx', 0)}[/] | 5xx: [bold red]{status_dist.get('5xx', 0)}[/]"
+        t_routes.add_row("Distribuição de Status HTTP", dist_str)
+        console.print(t_routes)
+
+        # Print top API routes if detected
+        apis = rr.get("api_endpoints", [])
+        if apis:
+            t_api = Table(title="[bold #c084fc]🔍 Rotas de API Detectadas (Amostra)[/]", border_style="#a855f7", box=box.ROUNDED)
+            t_api.add_column("Método", style="bold yellow", width=8)
+            t_api.add_column("Host", style="#93c5fd", width=25)
+            t_api.add_column("Path", style="#e2e8f0", width=35)
+            t_api.add_column("Status", style="green", width=8)
+            for a in apis[:10]:
+                t_api.add_row(a.get("method"), a.get("host"), a.get("path")[:35], str(a.get("status", "-")))
+            console.print(t_api)
+
+        # Stealth panel
+        stealth_info = (
+            "[bold green]✔ Chromium Automation Controlled Desativado[/] (--disable-blink-features=AutomationControlled)\n"
+            "[bold green]✔ Navigator Webdriver Mascarado[/] (undefined injetado em todas as abas e frames)\n"
+            "[bold green]✔ Canvas 2D & WebGL Stealth[/] (Ruído imperceptível de pixel + spoofing NVIDIA RTX 3060)\n"
+            "[bold green]✔ Web Audio API Stealth[/] (Micro-jitter em AudioBuffer contra fingerprinting acústico)\n"
+            "[bold green]✔ Floating In-Browser HUD[/] (Closed Shadow DOM isolado com status colaborativo)\n"
+            "[bold green]✔ Perfil Persistente de Usuário Ativo[/] (Cookies, logins e sessões preservados)\n"
+            "[bold green]✔ Redação Zero-Secret Ativa[/] (Senhas, Bearer tokens e chaves mascarados)"
+        )
+        console.print(Panel(stealth_info, title="[bold #c084fc]🛡️ Postura Anti-Bot & Anti-Detection Multi-Superfície[/]", border_style="green", box=box.ROUNDED))
+    finally:
+        if should_close:
+            await services.close()
+
+
+async def run_wait_challenge(
+    cdp_port: int,
+    i18n: I18n,
+    page_id: Optional[str] = None,
+    timeout_s: int = 120,
+    services=None,
+) -> None:
+    should_close = False
+    if services is None:
+        from achilles.services.application import ApplicationServices
+        ensure_chrome_running(cdp_port, i18n)
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        console.print(f"[bold yellow][!][/] [bold #e9d5ff]Monitorando desafios anti-bot / 2FA / Login...[/]")
+        console.print(f"[dim #94a3b8]    Se houver CAPTCHA ou login na janela do Chrome, resolva diretamente no navegador.[/]")
+        res = await services.call(
+            "browser_wait_for_challenge", {"page_id": page_id, "timeout_s": timeout_s}
+        )
+        status = res.get("status")
+        if status in ("resolved", "resolved_by_navigation"):
+            console.print(f"[bold green][✓][/] [bold #f8fafc]{res.get('message')}[/] ([dim]{res.get('elapsed_s')}s[/])")
+        elif status == "already_clear":
+            console.print(f"[bold cyan][i][/] [bold #f8fafc]{res.get('message')}[/]")
+        elif status == "timeout":
+            console.print(f"[bold red][!][/] [yellow]{res.get('message')}[/]")
+        else:
+            console.print(f"[yellow]{res.get('message')}[/]")
+    finally:
+        if should_close:
+            await services.close()
+
+
+async def run_domain_memory(
+    cdp_port: int,
+    i18n: I18n,
+    domain: Optional[str] = None,
+    services=None,
+) -> None:
+    should_close = False
+    if services is None:
+        from achilles.services.application import ApplicationServices
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        if domain:
+            res = await services.call(
+                "browser_domain_memory", {"operation": "get", "domain": domain}
+            )
+            mem = res.get("memory") or res
+            table = Table(title=f"[bold #c084fc]🧠 Memória Semântica: {domain}[/]", border_style="#a855f7", box=box.ROUNDED)
+            table.add_column("Propriedade", style="bold #93c5fd", width=25)
+            table.add_column("Valor", style="#f8fafc", width=50)
+            table.add_row("Autenticado", "[green]Sim[/]" if mem.get("authenticated") else "[yellow]Não[/]")
+            table.add_row("Atalhos", json.dumps(mem.get("shortcuts", {}), ensure_ascii=False))
+            table.add_row("APIs Conhecidas", f"{len(mem.get('api_endpoints', []))} rotas")
+            table.add_row("Notas", " | ".join(mem.get("notes", [])) or "Nenhuma")
+            console.print(table)
+        else:
+            res = await services.call("browser_domain_memory", {"operation": "list"})
+            domains = res.get("domains", [])
+            if not domains:
+                console.print("[dim yellow]Nenhuma memória semântica gravada ainda.[/]")
+                return
+            table = Table(title=f"[bold #c084fc]🧠 Memórias de Domínio Registradas ({len(domains)})[/]", border_style="#a855f7", box=box.ROUNDED)
+            table.add_column("Domínio", style="bold cyan", width=30)
+            table.add_column("Autenticado", width=14, justify="center")
+            table.add_column("Atalhos", style="#e2e8f0", width=20)
+            table.add_column("Rotas de API", style="#94a3b8", width=15)
+            for d in domains:
+                auth_str = "[bold green]SIM[/]" if d.get("authenticated") else "[dim yellow]NÃO[/]"
+                table.add_row(
+                    d.get("domain", ""),
+                    auth_str,
+                    f"{len(d.get('shortcuts', {}))} atalhos",
+                    f"{len(d.get('api_endpoints', []))} APIs",
+                )
+            console.print(table)
+    finally:
+        if should_close:
+            await services.close()
+
+
+async def run_export_report(
+    cdp_port: int,
+    i18n: I18n,
+    page_id: Optional[str] = None,
+    output_path: Optional[str] = None,
+    services=None,
+) -> None:
+    should_close = False
+    if services is None:
+        from achilles.services.application import ApplicationServices
+        ensure_chrome_running(cdp_port, i18n)
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        target_path = output_path or "achilles_session_report.html"
+        res = await services.call(
+            "browser_export_html_report", {"page_id": page_id, "output_path": target_path}
+        )
+        filepath = res.get("filepath", target_path)
+        console.print(
+            f"[bold green][✓][/] [bold #f8fafc]Dashboard HTML exportado com sucesso:[/] [bold cyan]{filepath}[/]"
+        )
+    finally:
+        if should_close:
+            await services.close()
+
+
+def run_protocol(lang: Optional[str] = None) -> None:
+    from achilles.cli.i18n import get_stored_language
+    is_pt = lang == "pt" or (lang is None and get_stored_language() == "pt")
+    if is_pt:
+        protocol_md = """# PROTOCOLO AGENTE AUTÔNOMO ACHILLES (v2.0)
+
+Você está conectado ao Achilles CDP Agent — o facilitador universal de navegação furtiva e colaboração humano-IA no Chrome.
+
+## 1. PRINCÍPIOS FUNDAMENTAIS DE OPERAÇÃO
+
+### 🔒 REGRA ZERO-SECRET (NAVEGAÇÃO COLABORATIVA)
+- Quando encontrar telas de login (Google, Meta, Twitter/X, LinkedIn, bancos, 2FA ou CAPTCHAs):
+  - **NÃO tente adivinhar credenciais e NUNCA solicite senhas ao usuário no prompt.**
+  - **INSTRUÇÃO AO USUÁRIO**: Diga ao usuário: *"Por favor, realize o login / resolva o desafio diretamente na janela do Chrome aberta ao lado; assim que concluir, continuarei a tarefa autonomamente."*
+  - O usuário faz login no navegador real. O Achilles usa um perfil persistente (`chrome_profile`), mantendo cookies e sessões de forma nativa e segura.
+  - O Achilles possui engine de redação estrita: senhas, Bearer tokens, cookies e chaves de API são automaticamente mascarados como `[REDACTED]` e NUNCA vazam para o seu contexto de IA.
+  - Após o usuário logar, assuma o controle da navegação e conclua o objetivo.
+
+### ⚡ TOKEN-ZERO-WASTE (MÁXIMA EFICIÊNCIA DE TOKENS)
+- **Para ler conteúdo/artigos/documentação**: SEMPRE execute `achilles read` (Reader Mode limpo em Markdown, reduzindo ~95% do consumo de tokens em comparação ao HTML bruto).
+- **Para interagir com elementos**: Execute `achilles snapshot --limit 50` (retorna sintaxe compacta linear: `[@ref] role "nome" (detalhes)` apenas dos elementos visíveis no viewport atual).
+- **Para isolar um formulário ou seção**: Use `achilles snapshot --selector "form"` ou `achilles snapshot --selector "#feed"`.
+
+### 🛡️ MODO FURTIVO ANTI-BOT & ANTI-DETECTION
+- O Chrome é executado com flags nativas contra detecção (`--disable-blink-features=AutomationControlled`), `navigator.webdriver = undefined`, mocks de runtime do Chrome e digitação com ritmo humano.
+- Evite rajadas instantâneas de múltiplos cliques; adote pausas naturais de 1 a 2 segundos entre passos complexos.
+
+---
+
+## 2. GUIA DE COMANDOS CLI PARA AGENTES
+
+| Objetivo | Comando CLI | Descrição |
+|---|---|---|
+| Listar Abas | `achilles pages` | Lista abas abertas, títulos, URLs e `page_id` ativo |
+| Ler Conteúdo | `achilles read` | Extrai o texto principal da página em Markdown limpo |
+| Ver Elementos | `achilles snapshot` | Exibe elementos clicáveis/interativos do viewport atual |
+| Clicar | `achilles act click <ref>` | Clica no elemento (ex: `achilles act click page_abc/1`) |
+| Digitar | `achilles act fill <ref> "<texto>"` | Digita texto no campo com cadência humanizada |
+| Pressionar Tecla | `achilles act press <ref> "Enter"` | Envia teclas de controle (Enter, Tab, Escape) |
+| Rolar Página | `achilles act scroll down` | Rola a página para baixo para carregar feeds infinitos |
+| Ver Tráfego | `achilles traffic` | Lista requisições HTTP da página redigidas |
+| Relatório | `achilles report` | Exibe métricas de tokens economizados e rotas de API |
+| Aguardar Humano | `achilles wait-challenge` | Aguarda resolução cooperativa de Turnstile/CAPTCHA/2FA |
+| Memória de Domínio | `achilles memory` | Consulta atalhos e histórico semântico do domínio |
+| Exportar Dashboard | `achilles export-report` | Exporta relatório HTML dark-mode com KPIs e rotas |
+| Auditoria OWASP | `achilles audit` | Executa auditoria de segurança da aba ativa |
+
+---
+
+## 3. PROTOCOLOS DE COMUNICAÇÃO AVANÇADOS
+
+- **Servidor MCP stdio**: Inicie com `achilles mcp` para integrar com Claude Code, Cursor ou agentes compatíveis com MCP.
+- **REST Bridge Local**: Inicie com `achilles start --port 8765` para consultar rotas JSON autenticadas (`/api/read`, `/api/dom/tree`, `/api/action/click`, `/api/report`, `/api/report/html`, `/api/challenge/wait`, `/api/memory`).
+
+Execute os comandos diretamente via terminal para cumprir a missão designada de forma autônoma.
+"""
+    else:
+        protocol_md = """# ACHILLES CDP AGENT — AUTONOMOUS AGENT PROTOCOL (v2.0)
+
+You are operating the Achilles CDP Agent, an autonomous, anti-detection browser bridge designed for AI agents cooperating with human users.
+
+## 1. CORE OPERATING PRINCIPLES
+
+### 🔒 ZERO-SECRET RULE (HUMAN-AI COLLABORATION)
+- When visiting services requiring authentication (Google, Meta, Twitter/X, LinkedIn, banking, 2FA, CAPTCHAs):
+  - **NEVER prompt the user to input passwords in CLI or chat.**
+  - **INSTRUCT THE USER**: State: *"Please complete the login or captcha challenge directly on the open Chrome browser window; once finished, I will resume the workflow autonomously."*
+  - The human logs in securely in genuine Chrome. Achilles uses a persistent profile (`chrome_profile`), preserving cookies and sessions safely across runs.
+  - Achilles automatically redacts passwords, Bearer tokens, cookies, and secret keys as `[REDACTED]`. They NEVER leak into your AI prompt context.
+  - Once authenticated, take over navigation to complete the user's objective.
+
+### ⚡ TOKEN-ZERO-WASTE ENGINE
+- **To read pages, articles, docs, or feeds**: ALWAYS execute `achilles read` (extracts clean Markdown via Reader Mode, saving ~95% tokens vs raw HTML).
+- **To inspect interactive UI elements**: Run `achilles snapshot --limit 50` (returns compact linear syntax: `[@ref] role "name" (details)` strictly within the current viewport).
+- **To isolate a specific container**: Use `achilles snapshot --selector "form"` or `achilles snapshot --selector "#feed"`.
+
+### 🛡️ ANTI-BOT STEALTH & HUMANIZED CADENCE
+- Chrome runs with multi-surface stealth flags (`--disable-blink-features=AutomationControlled`), masked `navigator.webdriver = undefined`, Canvas 2D pixel noise, WebGL NVIDIA spoofing, Web Audio micro-jitter, and closed Shadow DOM HUD.
+- Avoid instant machine bursts; use realistic 1-2s pauses between complex actions.
+
+---
+
+## 2. AGENT CLI COMMAND CHEAT SHEET
+
+| Goal | CLI Command | Description |
+|---|---|---|
+| List Tabs | `achilles pages` | Lists open tabs, titles, sanitized URLs, and `page_id` |
+| Read Content | `achilles read` | Reader Mode: clean Markdown content (~95% token savings) |
+| Inspect Viewport | `achilles snapshot` | Compact list of interactive elements with `[@ref]` |
+| Click Element | `achilles act click <ref>` | Clicks element by its reference (e.g., `page_abc/1`) |
+| Fill Input | `achilles act fill <ref> "<value>"` | Types into field with humanized key cadence |
+| Press Key | `achilles act press <ref> "Enter"` | Simulates Enter, Tab, Escape, etc. |
+| Scroll | `achilles act scroll down` | Scrolls viewport down to trigger lazy loading |
+| Inspect Traffic | `achilles traffic` | Lists captured, sanitized HTTP exchanges |
+| View Report | `achilles report` | Executive report of tokens saved & analyzed API routes |
+| Wait Human | `achilles wait-challenge` | Waits cooperatively for human resolution of Turnstile/CAPTCHA/2FA |
+| Domain Memory | `achilles memory` | Queries domain shortcuts, auth status, and API routes |
+| Export Dashboard | `achilles export-report` | Exports standalone dark-mode HTML report with KPIs and APIs |
+| OWASP Audit | `achilles audit` | Security posture and response header check |
+
+---
+
+## 3. INTEGRATION TRANSPORTS
+
+- **MCP stdio**: Run `achilles mcp` for seamless Model Context Protocol connection.
+- **REST Bridge**: Run `achilles start --port 8765` for authenticated local HTTP endpoints (`/api/read`, `/api/dom/tree`, `/api/action/click`, `/api/report`).
+
+Run these CLI commands directly in your terminal to autonomously execute the user's instructions.
+"""
+    print(protocol_md)
+
+
 async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
     from achilles.services.application import ApplicationServices
     i18n = I18n(lang)
@@ -510,6 +928,26 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                     console.print(f"[bold green][+][/] {i18n.t('tab_selected')} ([bold cyan]{target_id}[/])")
                 except Exception as exc:
                     console.print(f"[yellow]Aviso: {exc}[/]")
+            elif cmd in ("new", "newtab", "tab"):
+                target_url = args[0] if args else "about:blank"
+                if target_url != "about:blank" and not target_url.startswith(("http://", "https://", "about:")):
+                    target_url = "https://" + target_url
+                try:
+                    res = await services.call("browser_new_tab", {"url": target_url})
+                    current_page_id = res.get("page_id")
+                    current_url = res.get("url", target_url)
+                    console.print(f"[bold green][+][/] Nova aba: [bold cyan]{current_page_id}[/] ([dim]{current_url}[/])")
+                except Exception as exc:
+                    console.print(f"[yellow]Erro ao abrir aba: {exc}[/]")
+            elif cmd in ("close", "closetab"):
+                target_page = args[0] if args else current_page_id
+                try:
+                    res = await services.call("browser_close_tab", {"page_id": target_page})
+                    console.print(f"[bold green][✓][/] Aba fechada: [cyan]{res.get('closed_page_id')}[/]")
+                    current_page_id = res.get("active_page_id")
+                    current_url = "about:blank"
+                except Exception as exc:
+                    console.print(f"[yellow]Erro ao fechar aba: {exc}[/]")
             elif cmd in ("goto", "open"):
                 if not args:
                     console.print(f"[yellow]Uso/Usage: /{cmd} <url>[/]")
@@ -602,6 +1040,34 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 req_id = args[0]
                 res_c = await services.call("network_curl", {"request_id": req_id, "shell": "powershell"})
                 console.print(Panel(f"[bold #a855f7]{res_c.get('curl')}[/]", title=f"[bold #c084fc]{i18n.t('curl_title')}[/]", border_style="#a855f7", box=box.ROUNDED))
+            elif cmd in ("read", "reader"):
+                max_len = int(args[0]) if args and args[0].isdigit() else 50000
+                await run_read(cdp_port, i18n=i18n, page_id=current_page_id, max_length=max_len, services=services)
+            elif cmd in ("report", "relatorio"):
+                await run_report(cdp_port, i18n=i18n, page_id=current_page_id, services=services)
+            elif cmd in ("export", "export-report", "dashboard"):
+                target_file = args[0] if args else None
+                await run_export_report(
+                    cdp_port,
+                    i18n=i18n,
+                    page_id=current_page_id,
+                    output_path=target_file,
+                    services=services,
+                )
+            elif cmd in ("memory", "mem"):
+                dom = args[0] if args else None
+                await run_domain_memory(cdp_port, i18n=i18n, domain=dom, services=services)
+            elif cmd in ("wait-human", "challenge", "wait-challenge"):
+                timeout = int(args[0]) if args and args[0].isdigit() else 120
+                await run_wait_challenge(
+                    cdp_port,
+                    i18n=i18n,
+                    page_id=current_page_id,
+                    timeout_s=timeout,
+                    services=services,
+                )
+            elif cmd in ("ai", "protocol"):
+                run_protocol(i18n.lang)
             elif cmd == "audit":
                 await run_audit(cdp_port, i18n=i18n, page_id=current_page_id, services=services)
             else:
