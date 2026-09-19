@@ -5,21 +5,18 @@ echo     ACHILLES CDP AGENT — INSTALADOR WINDOWS
 echo ===================================================
 echo.
 
-echo [1/3] Instalando dependencias e pacote achilles...
-pip install -e .
+echo [1/2] Instalando dependencias e pacote achilles em modo editavel...
+python -m pip install -e ".[test]"
 
 echo.
-echo [2/3] Compilando executavel standalone (achilles.exe)...
-python packaging/build_exe.py
-
-echo.
-echo [3/3] Registrando atalho global 'achilles' no sistema...
-set "TARGET_DIR=%LOCALAPPDATA%\Microsoft\WindowsApps"
-if exist "%TARGET_DIR%" (
-    copy /Y "dist\achilles.exe" "%TARGET_DIR%\achilles.exe" >nul
-    echo [OK] achilles.exe copiado para %TARGET_DIR% (Ja esta no seu PATH!)
+echo [2/2] Validando comando global 'achilles'...
+where achilles >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    echo [OK] Comando 'achilles' disponivel diretamente no seu PATH!
 ) else (
-    echo [INFO] dist\achilles.exe pronto para uso.
+    echo [INFO] Pacote instalado. Caso 'achilles' nao seja reconhecido,
+    echo        certifique-se de que a pasta Scripts do seu Python esta no PATH.
+    echo        Voce tambem pode executar diretamente: python -m achilles
 )
 
 echo.

@@ -15,6 +15,7 @@ setup(
         "playwright>=1.49,<1.59; python_version<'3.10'",
         "playwright>=1.59,<2; python_version>='3.10'",
         "pydantic>=2.6,<3",
+        "rich>=13.0.0",
     ],
     extras_require={
         "test": ["httpx>=0.27,<1"],

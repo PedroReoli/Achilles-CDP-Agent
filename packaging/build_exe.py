@@ -14,12 +14,8 @@ def build():
     sep = ";" if os.name == "nt" else ":"
     cmd = [
         sys.executable, "-m", "PyInstaller",
-        "--name=achilles",
-        "--onefile",
-        "--console",
         "--clean",
-        f"--add-data=achilles{sep}achilles",
-        "achilles/__main__.py"
+        "achilles.spec"
     ]
     print("Executando:", " ".join(cmd))
     subprocess.run(cmd, check=True)
