@@ -74,6 +74,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     pages_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     pages_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
+    # 3b. Open / Navigate
+    open_p = commands.add_parser("open", aliases=["nav", "navigate"], help="Navega a aba para uma URL")
+    open_p.add_argument("url", type=str, help="URL de destino (ex: https://news.ycombinator.com)")
+    open_p.add_argument("--page-id", type=str, default=None)
+    open_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    open_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
+
     # 4. Snapshot
     snap_p = commands.add_parser("snapshot", aliases=["snap"], help="Captura snapshot semântico e elementos interativos")
     snap_p.add_argument("--page-id", type=str, default=None)
@@ -181,6 +188,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             from achilles.cli.commands import run_pages
             from achilles.cli.i18n import I18n
             asyncio.run(run_pages(args.cdp_port, I18n(getattr(args, "lang", None))))
+        elif args.command in ("open", "nav", "navigate"):
+            from achilles.cli.commands import run_open
+            from achilles.cli.i18n import I18n
+            asyncio.run(run_open(args.cdp_port, args.url, args.page_id, I18n(getattr(args, "lang", None))))
         elif args.command in ("snapshot", "snap"):
             from achilles.cli.commands import run_snapshot
             from achilles.cli.i18n import I18n

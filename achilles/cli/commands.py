@@ -116,6 +116,11 @@ def ensure_chrome_running(cdp_port: int, i18n: I18n):
         console.print(f"[bold #a855f7][*][/] {i18n.t('starting_persistent_chrome')} [dim cyan]{profile_dir}[/]...")
         console.print(f"[dim green]    ✔ {i18n.t('persistent_profile_info')}[/]")
         
+        popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = (
+                getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
         proc = subprocess.Popen([
             chrome_bin,
             f"--remote-debugging-port={cdp_port}",
@@ -124,9 +129,9 @@ def ensure_chrome_running(cdp_port: int, i18n: I18n):
             "--no-default-browser-check",
             "--disable-blink-features=AutomationControlled",
             "about:blank"
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], **popen_kwargs)
         
-        for _ in range(30):
+        for _ in range(50):
             time.sleep(0.2)
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -287,9 +292,25 @@ def print_help_table(i18n: I18n):
     console.print(table)
 
 
+async def run_open(cdp_port: int, url: str, page_id: Optional[str] = None, i18n: Optional[I18n] = None) -> None:
+    if not url.startswith(("http://", "https://", "about:", "chrome://")):
+        url = "https://" + url
+    i18n = i18n or I18n()
+    ensure_chrome_running(cdp_port, i18n)
+    from achilles.services.application import ApplicationServices
+    services = ApplicationServices(cdp_port)
+    args: Dict[str, Any] = {"url": url}
+    if page_id:
+        args["page_id"] = page_id
+    console.print(f"[bold #a855f7][*][/] Navegando para [cyan]{url}[/]...")
+    res = await services.call("browser_navigate", args)
+    console.print(f"[bold green]✔ Concluído:[/] '{res.get('title')}' ([dim]{res.get('url')}[/])")
+
+
 async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: Optional[str] = None) -> None:
     should_close = False
     if services is None:
+        ensure_chrome_running(cdp_port, i18n)
         from achilles.services.application import ApplicationServices
         services = ApplicationServices(cdp_port)
         should_close = True
@@ -342,6 +363,7 @@ async def run_snapshot(
 ) -> None:
     should_close = False
     if services is None:
+        ensure_chrome_running(cdp_port, i18n)
         from achilles.services.application import ApplicationServices
         services = ApplicationServices(cdp_port)
         should_close = True
