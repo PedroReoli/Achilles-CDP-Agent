@@ -1,5 +1,6 @@
 """Redação recursiva usada antes de qualquer exportação."""
 
+import base64
 import hashlib
 import json
 import re
@@ -7,13 +8,29 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SENSITIVE = re.compile(
-    r"authorization|cookie|token|secret|password|passwd|api[-_]?key|credential|x-api-key|stripe-signature|aws-sigv4", re.I
+    r"authorization|cookie|token|secret|password|passwd|api[-_]?key|credential|"
+    r"x-api-key|stripe-signature|aws-sigv4|bearer|access[-_]?token|refresh[-_]?token|"
+    r"id[-_]?token|private[-_]?key|auth[-_]?token|session[-_]?id|client[-_]?secret",
+    re.I,
 )
 ASSIGNMENT = re.compile(
-    r"""(?i)((?:password|passwd|token|secret|api[_-]?key|stripe-signature|aws-sigv4)["']?\s*[:=]\s*["']?)([^\s"'&,;}]+)"""
+    r"""(?i)((?:password|passwd|token|secret|api[_-]?key|stripe-signature|aws-sigv4|access_token|refresh_token)["']?\s*[:=]\s*["']?)([^\s"'&,;}]+)"""
 )
 SECRETS = re.compile(
-    r"(?:sbp_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]+|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*|AKIA[0-9A-Z]{16})"
+    r"(?:"
+    r"sbp_[A-Za-z0-9]{20,}|"
+    r"sb_secret_[A-Za-z0-9_-]+|"
+    r"[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"sk-(?:proj-|admin-)?[A-Za-z0-9_-]{20,}|"
+    r"sk-ant-[A-Za-z0-9_-]{20,}|"
+    r"AIza[A-Za-z0-9_\-]{30,45}|"
+    r"gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"github_pat_[A-Za-z0-9_]{22,}|"
+    r"xox[baprs]-[0-9A-Za-z\-]{10,}|"
+    r"hf_[A-Za-z0-9]{20,}|"
+    r"eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*|"
+    r"AKIA[0-9A-Z]{16}"
+    r")"
 )
 
 
@@ -54,9 +71,6 @@ def redact_url(url: str) -> str:
         return urlunsplit((parts.scheme, host, redact(parts.path), query, redact(parts.fragment)))
     except ValueError:
         return mask(url)
-
-
-import base64
 
 def redact_body(body: str, content_type: str) -> str:
     if "x-www-form-urlencoded" in content_type:

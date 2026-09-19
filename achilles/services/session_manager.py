@@ -7,6 +7,7 @@ import random
 import uuid
 from collections import deque
 from typing import TYPE_CHECKING, Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit
 
 from .errors import ServiceError
 from .redaction import redact, redact_url
@@ -16,6 +17,115 @@ if TYPE_CHECKING:
     from playwright.async_api import Browser, BrowserContext, Frame, Page, Playwright
 
 LOG = logging.getLogger(__name__)
+
+STEALTH_SCRIPT = """
+(() => {
+    try {
+        // 1. Mask navigator.webdriver
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true
+        });
+
+        // 2. Mock Chrome runtime APIs
+        if (!window.chrome) {
+            window.chrome = {};
+        }
+        if (!window.chrome.runtime) {
+            window.chrome.runtime = {};
+        }
+        if (!window.chrome.loadTimes) {
+            window.chrome.loadTimes = function() {};
+        }
+        if (!window.chrome.csi) {
+            window.chrome.csi = function() {};
+        }
+        if (!window.chrome.app) {
+            window.chrome.app = {};
+        }
+
+        // 3. Spoof Notification permission
+        if (window.Notification && Notification.permission === 'default') {
+            Object.defineProperty(Notification, 'permission', {
+                get: () => 'default',
+                configurable: true
+            });
+        }
+
+        // 4. Hardware metrics consistency
+        if (!navigator.hardwareConcurrency || navigator.hardwareConcurrency < 4) {
+            Object.defineProperty(navigator, 'hardwareConcurrency', {
+                get: () => 8,
+                configurable: true
+            });
+        }
+        if (!navigator.deviceMemory || navigator.deviceMemory < 4) {
+            Object.defineProperty(navigator, 'deviceMemory', {
+                get: () => 8,
+                configurable: true
+            });
+        }
+
+        // 5. Plugin array emulation
+        if (navigator.plugins && navigator.plugins.length === 0) {
+            const mockPlugins = [
+                { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }
+            ];
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => mockPlugins,
+                configurable: true
+            });
+        }
+
+        // 6. WebGL Unmasked Vendor & Renderer Spoofing
+        const getParameterWrapper = (original) => function(parameter) {
+            if (parameter === 37445) { // UNMASKED_VENDOR_WEBGL
+                return 'Google Inc. (NVIDIA)';
+            }
+            if (parameter === 37446) { // UNMASKED_RENDERER_WEBGL
+                return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+            }
+            return original.call(this, parameter);
+        };
+
+        if (window.WebGLRenderingContext) {
+            const origGetParam = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = getParameterWrapper(origGetParam);
+        }
+        if (window.WebGL2RenderingContext) {
+            const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+            WebGL2RenderingContext.prototype.getParameter = getParameterWrapper(origGetParam2);
+        }
+
+        // 7. Canvas Fingerprint Micro-Noise
+        if (window.CanvasRenderingContext2D) {
+            const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+            CanvasRenderingContext2D.prototype.getImageData = function(sx, sy, sw, sh, settings) {
+                const imageData = origGetImageData.call(this, sx, sy, sw, sh, settings);
+                if (imageData && imageData.data && imageData.data.length > 4) {
+                    // Micro-shift least significant bit of first pixel
+                    imageData.data[0] = (imageData.data[0] ^ 1);
+                }
+                return imageData;
+            };
+        }
+
+        // 8. Web Audio API Acoustic Micro-Jitter
+        if (window.AudioBuffer) {
+            const origGetChannelData = AudioBuffer.prototype.getChannelData;
+            AudioBuffer.prototype.getChannelData = function(channel) {
+                const data = origGetChannelData.call(this, channel);
+                if (data && data.length > 10) {
+                    data[0] += 0.0000001;
+                }
+                return data;
+            };
+        }
+    } catch (e) {}
+})();
+"""
 
 
 class TargetRegistry:
@@ -124,6 +234,7 @@ class BrowserSessionManager:
         page_id = self.registry.add(page)
         if id(page) not in self._pages:
             self._pages.add(id(page))
+            self._spawn(lambda: page.add_init_script(STEALTH_SCRIPT))
             self._listen(page, "close", lambda: self._remove_page(page))
             self._listen(page, "frameattached", self.registry.frame_id)
             self._listen(page, "framedetached", self.registry.remove_frame)
@@ -147,6 +258,7 @@ class BrowserSessionManager:
                 self._track_page(page)
             return
         self._contexts.add(id(context))
+        self._spawn(lambda: context.add_init_script(STEALTH_SCRIPT))
         self._listen(context, "page", self._track_page)
         self._listen(context, "request", lambda req: self.journal.request(req, self._page_id(req)))
         self._listen(
@@ -209,6 +321,10 @@ class BrowserSessionManager:
                     self.generation += 1
                     for context in self._browser.contexts:
                         self._track_context(context)
+                        try:
+                            await context.add_init_script(STEALTH_SCRIPT)
+                        except Exception:
+                            pass
                     return
                 except Exception as exc:
                     await self._cleanup()
@@ -257,6 +373,43 @@ class BrowserSessionManager:
             "selection_policy": "explicit_or_latest_discovered",
         }
 
+    async def new_page(self, url: Optional[str] = None) -> Dict[str, Any]:
+        await self.connect()
+        if self._browser is None:
+            raise ServiceError("CDP_UNAVAILABLE", "Chrome CDP indisponível.")
+        context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
+        page = await context.new_page()
+        key = self._track_page(page)
+        self.registry.active_page_id = key
+        target_url = url or "about:blank"
+        if url:
+            await self.navigate(target_url, page_id=key)
+        title = ""
+        try:
+            title = await page.title()
+        except Exception:
+            pass
+        return {
+            "status": "created",
+            "page_id": key,
+            "url": redact_url(page.url),
+            "title": redact(title),
+        }
+
+    async def close_page(self, page_id: Optional[str] = None) -> Dict[str, Any]:
+        key, page = await self.page(page_id)
+        if not page.is_closed():
+            try:
+                await page.close()
+            except Exception:
+                pass
+        self.registry.remove(page)
+        return {
+            "status": "closed",
+            "closed_page_id": key,
+            "active_page_id": self.registry.active_page_id,
+        }
+
     async def select_page(self, page_id: str) -> Dict[str, Any]:
         key, page = await self.page(page_id)
         await page.bring_to_front()
@@ -270,6 +423,14 @@ class BrowserSessionManager:
         wait_until: str = "domcontentloaded",
         timeout_ms: int = 15000,
     ) -> Dict[str, Any]:
+        parsed = urlsplit(url)
+        scheme = parsed.scheme.lower() if parsed.scheme else ""
+        if scheme not in ("http", "https", "about"):
+            raise ServiceError(
+                "INVALID_ARGUMENT",
+                f"Esquema de URL '{scheme or 'nenhum'}' bloqueado por segurança. Permitidos: http, https, about.",
+            )
+
         key, page = await self.page(page_id)
         async with self.registry.locks[key]:
             from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError

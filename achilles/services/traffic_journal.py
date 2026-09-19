@@ -208,3 +208,71 @@ class TrafficJournal:
             },
             "item": items,
         }
+
+    def get_routes_report(self, page_id: Optional[str] = None) -> Dict[str, Any]:
+        records = [r for r in self.records if page_id is None or r.get("page_id") == page_id]
+        domains: Dict[str, int] = {}
+        methods: Dict[str, int] = {}
+        statuses: Dict[str, int] = {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, "failed": 0, "other": 0}
+        api_endpoints: List[Dict[str, Any]] = []
+        seen_apis = set()
+
+        for raw in records:
+            r = self.public_record(raw)
+            method = r.get("method", "GET")
+            methods[method] = methods.get(method, 0) + 1
+
+            url = r.get("url", "")
+            parsed = urlsplit(url)
+            host = parsed.hostname or "unknown"
+            domains[host] = domains.get(host, 0) + 1
+
+            status = r.get("status")
+            if r.get("failure"):
+                statuses["failed"] += 1
+            elif status is None:
+                statuses["other"] += 1
+            elif 200 <= status < 300:
+                statuses["2xx"] += 1
+            elif 300 <= status < 400:
+                statuses["3xx"] += 1
+            elif 400 <= status < 500:
+                statuses["4xx"] += 1
+            elif 500 <= status < 600:
+                statuses["5xx"] += 1
+            else:
+                statuses["other"] += 1
+
+            res_type = r.get("resource_type", "")
+            req_headers = r.get("request_headers", {})
+            resp_headers = r.get("response_headers", {})
+            is_api = (
+                res_type in ("xhr", "fetch")
+                or "application/json" in req_headers.get("accept", "")
+                or "application/json" in resp_headers.get("content-type", "")
+                or "/api/" in parsed.path
+                or "/graphql" in parsed.path
+                or "/v1/" in parsed.path
+                or "/v2/" in parsed.path
+            )
+            api_key = f"{method} {parsed.scheme}://{host}{parsed.path}"
+            if is_api and api_key not in seen_apis:
+                seen_apis.add(api_key)
+                api_endpoints.append({
+                    "method": method,
+                    "host": host,
+                    "path": parsed.path,
+                    "status": status,
+                    "resource_type": res_type,
+                })
+
+        return {
+            "total_requests": len(records),
+            "unique_domains_count": len(domains),
+            "domains": domains,
+            "methods": methods,
+            "status_distribution": statuses,
+            "api_endpoints_detected": len(api_endpoints),
+            "api_endpoints": api_endpoints[:50],
+        }
+
