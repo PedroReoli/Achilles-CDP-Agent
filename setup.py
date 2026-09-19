@@ -3,7 +3,7 @@ from setuptools import find_namespace_packages, setup
 
 setup(
     name="achilles-cdp",
-    version="2.0.0",
+    version="2.1.0",
     description="Chrome CDP Application Services for local AI agents",
     author="Pedro Lucas Reis & Reoli Open Source",
     packages=find_namespace_packages(include=["achilles", "achilles.*"]),

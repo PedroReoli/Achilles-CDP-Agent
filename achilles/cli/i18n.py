@@ -39,7 +39,7 @@ def set_stored_language(lang: str) -> None:
 
 STRINGS: Dict[str, Dict[str, str]] = {
     "pt": {
-        "banner_subtitle": "ACHILLES CDP AGENT • Automação e Segurança de Navegador • Reoli Suite v2.0",
+        "banner_subtitle": "ACHILLES CDP AGENT • Automação e Segurança de Navegador • Achilles v2.1",
         "connecting": "Conectando ao Chrome CDP na porta",
         "connected": "Conectado ao Chrome com sucesso!",
         "type_help": "Digite [bold #c084fc]/help[/] para comandos ou [bold #c084fc]/exit[/] para sair.",
@@ -118,7 +118,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "goodbye": "Achilles encerrado com sucesso. Até logo!",
     },
     "en": {
-        "banner_subtitle": "ACHILLES CDP AGENT • Autonomous Browser Automation & Security • Reoli Suite v2.0",
+        "banner_subtitle": "ACHILLES CDP AGENT • Autonomous Browser Automation & Security • Achilles v2.1",
         "connecting": "Connecting to Chrome CDP on port",
         "connected": "Connected to Chrome successfully!",
         "type_help": "Type [bold #c084fc]/help[/] for commands or [bold #c084fc]/exit[/] to quit.",

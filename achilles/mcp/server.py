@@ -45,7 +45,7 @@ class MCPServer:
             result = {
                 "protocolVersion": self.version,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "achilles-cdp", "version": "2.0.0"},
+                "serverInfo": {"name": "achilles-cdp", "version": "2.1.0"},
             }
         elif method == "ping":
             result = {}

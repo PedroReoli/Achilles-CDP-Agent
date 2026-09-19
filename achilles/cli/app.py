@@ -54,7 +54,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         prog="achilles", description="Achilles — Chrome CDP Autonomous Agent & Security Suite"
     )
-    parser.add_argument("--version", action="version", version="achilles 2.0.0")
+    parser.add_argument("--version", action="version", version="achilles 2.1.0")
     parser.add_argument("--lang", "-l", choices=["pt", "en"], default=None, help="Idioma da interface (pt / en)")
     parser.add_argument("--ai", action="store_true", help="Exibe o protocolo autônomo para agentes de IA")
 

@@ -711,7 +711,7 @@ def run_protocol(lang: Optional[str] = None) -> None:
     from achilles.cli.i18n import get_stored_language
     is_pt = lang == "pt" or (lang is None and get_stored_language() == "pt")
     if is_pt:
-        protocol_md = """# PROTOCOLO AGENTE AUTÔNOMO ACHILLES (v2.0)
+        protocol_md = """# PROTOCOLO AGENTE AUTÔNOMO ACHILLES (v2.1)
 
 Você está conectado ao Achilles CDP Agent — o facilitador universal de navegação furtiva e colaboração humano-IA no Chrome.
 
@@ -764,7 +764,7 @@ Você está conectado ao Achilles CDP Agent — o facilitador universal de naveg
 Execute os comandos diretamente via terminal para cumprir a missão designada de forma autônoma.
 """
     else:
-        protocol_md = """# ACHILLES CDP AGENT — AUTONOMOUS AGENT PROTOCOL (v2.0)
+        protocol_md = """# ACHILLES CDP AGENT — AUTONOMOUS AGENT PROTOCOL (v2.1)
 
 You are operating the Achilles CDP Agent, an autonomous, anti-detection browser bridge designed for AI agents cooperating with human users.
 
