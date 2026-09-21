@@ -28,6 +28,7 @@ if sys.platform == "win32":
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -77,15 +78,14 @@ def _print_banner(i18n: I18n):
     )
 
 
-def ensure_chrome_running(cdp_port: int, i18n: I18n):
+def ensure_chrome_running(cdp_port: int, i18n: Optional[I18n] = None):
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
-                return None
+        with socket.create_connection(("127.0.0.1", cdp_port), timeout=0.5):
+            return None
     except Exception:
         pass
 
+    i18n = i18n or I18n()
     possible_paths = []
     if sys.platform == "win32":
         possible_paths = [
@@ -116,28 +116,57 @@ def ensure_chrome_running(cdp_port: int, i18n: I18n):
         console.print(f"[bold #a855f7][*][/] {i18n.t('starting_persistent_chrome')} [dim cyan]{profile_dir}[/]...")
         console.print(f"[dim green]    ✔ {i18n.t('persistent_profile_info')}[/]")
         
-        popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        proc = None
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = (
-                getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            )
-        proc = subprocess.Popen([
-            chrome_bin,
-            f"--remote-debugging-port={cdp_port}",
-            f"--user-data-dir={str(profile_dir)}",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-blink-features=AutomationControlled",
-            "about:blank"
-        ], **popen_kwargs)
+            try:
+                cli_args = f'"{chrome_bin}" --remote-debugging-port={cdp_port} "--user-data-dir={profile_dir}" --no-first-run --no-default-browser-check about:blank'
+                powershell_cmd = f"Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine = '{cli_args}'}}"
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", powershell_cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    check=True,
+                )
+            except Exception:
+                popen_kwargs = {
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                    "stdin": subprocess.DEVNULL,
+                    "close_fds": True,
+                    "creationflags": (
+                        getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    ),
+                }
+                proc = subprocess.Popen([
+                    chrome_bin,
+                    f"--remote-debugging-port={cdp_port}",
+                    f"--user-data-dir={str(profile_dir)}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "about:blank",
+                ], **popen_kwargs)
+        else:
+            popen_kwargs = {
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "stdin": subprocess.DEVNULL,
+                "close_fds": True,
+            }
+            proc = subprocess.Popen([
+                chrome_bin,
+                f"--remote-debugging-port={cdp_port}",
+                f"--user-data-dir={str(profile_dir)}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "about:blank",
+            ], **popen_kwargs)
         
         for _ in range(50):
             time.sleep(0.2)
             try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(0.2)
-                    if s.connect_ex(("127.0.0.1", cdp_port)) == 0:
-                        break
+                with socket.create_connection(("127.0.0.1", cdp_port), timeout=0.5):
+                    break
             except Exception:
                 pass
         return proc
@@ -292,19 +321,53 @@ def print_help_table(i18n: I18n):
     console.print(table)
 
 
-async def run_open(cdp_port: int, url: str, page_id: Optional[str] = None, i18n: Optional[I18n] = None) -> None:
+async def run_open(cdp_port: int, url: str, page_id: Optional[str] = None, i18n: Optional[I18n] = None, services=None) -> None:
     if not url.startswith(("http://", "https://", "about:", "chrome://")):
         url = "https://" + url
+    should_close = False
     i18n = i18n or I18n()
-    ensure_chrome_running(cdp_port, i18n)
-    from achilles.services.application import ApplicationServices
-    services = ApplicationServices(cdp_port)
-    args: Dict[str, Any] = {"url": url}
-    if page_id:
-        args["page_id"] = page_id
-    console.print(f"[bold #a855f7][*][/] Navegando para [cyan]{url}[/]...")
-    res = await services.call("browser_navigate", args)
-    console.print(f"[bold green]✔ Concluído:[/] '{res.get('title')}' ([dim]{res.get('url')}[/])")
+    if services is None:
+        ensure_chrome_running(cdp_port, i18n)
+        from achilles.services.application import ApplicationServices
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        args: Dict[str, Any] = {"url": url}
+        if page_id:
+            args["page_id"] = page_id
+        console.print(f"[bold #a855f7][*][/] Navegando para [cyan]{url}[/]...")
+        res = await services.call("browser_navigate", args)
+        console.print(f"[bold green]✔ Concluído:[/] '{res.get('title')}' ([dim]{res.get('url')}[/])")
+    finally:
+        if should_close:
+            await services.close()
+            await asyncio.sleep(0.05)
+
+
+async def run_status(cdp_port: int, i18n: Optional[I18n] = None, services=None) -> None:
+    should_close = False
+    i18n = i18n or I18n()
+    if services is None:
+        ensure_chrome_running(cdp_port, i18n)
+        from achilles.services.application import ApplicationServices
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        status = await services.call("browser_status", {})
+        panel_content = Text.from_markup(
+            f"[bold #a855f7]CDP Endpoint:[/] [cyan]{status.get('cdp_url')}[/]\n"
+            f"[bold #a855f7]Modo / Mode:[/] [green]{status.get('mode')}[/]\n"
+            f"[bold #a855f7]Reqs Gravadas:[/] [bold #c084fc]{status.get('recorded_requests')}[/]\n"
+            f"[bold #a855f7]Geração / Generation:[/] {status.get('generation')}\n"
+            f"[bold #a855f7]Profile Dir:[/] [dim cyan]{get_chrome_profile_dir()}[/]"
+        )
+        console.print(Panel(panel_content, title=f"[bold #c084fc]📊 {i18n.t('desc_status')}[/]", border_style="#a855f7", box=box.ROUNDED))
+    finally:
+        if should_close:
+            await services.close()
+            await asyncio.sleep(0.05)
 
 
 async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: Optional[str] = None) -> None:
@@ -330,11 +393,11 @@ async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: O
             box=box.ROUNDED,
             header_style="bold #c084fc",
         )
-        table.add_column("#", style="bold #c084fc", width=4, justify="center")
-        table.add_column(i18n.t("col_status"), width=12, justify="center")
-        table.add_column("Page ID", style="bold #e9d5ff", width=22)
-        table.add_column("Título / Title", style="#f8fafc", width=32)
-        table.add_column("URL", style="cyan", width=42)
+        table.add_column("#", style="bold #c084fc", justify="center")
+        table.add_column(i18n.t("col_status"), justify="center")
+        table.add_column("Page ID", style="bold #e9d5ff")
+        table.add_column("Título / Title", style="#f8fafc")
+        table.add_column("URL", style="cyan")
 
         for idx, p in enumerate(pages, start=1):
             is_active = f"[bold green]{i18n.t('active_badge')}[/]" if p.get("page_id") == active_id else f"[dim #64748b]{i18n.t('inactive_badge')}[/]"
@@ -349,6 +412,7 @@ async def run_pages(cdp_port: int, i18n: I18n, services=None, current_page_id: O
     finally:
         if should_close:
             await services.close()
+            await asyncio.sleep(0.05)
 
 
 async def run_snapshot(
@@ -384,15 +448,15 @@ async def run_snapshot(
 
         table = Table(
             title=f"[bold #e9d5ff]{i18n.t('snap_title')} [dim]({len(elements)} {i18n.t('snap_elements_count')})[/][/]",
-            subtitle=f"[bold green]✔ Economia de Tokens: {saved_pct} (Viewport)[/]" if saved_pct else None,
+            caption=f"[bold green]✔ Economia de Tokens: {saved_pct} (Viewport)[/]" if saved_pct else None,
             border_style="#a855f7",
             box=box.ROUNDED,
             header_style="bold #c084fc",
         )
-        table.add_column(i18n.t("col_ref"), style="bold cyan", width=34)
-        table.add_column(i18n.t("col_role"), style="bold #c084fc", width=16)
-        table.add_column(i18n.t("col_name"), style="#f8fafc", width=46)
-        table.add_column(i18n.t("col_state"), width=14, justify="center")
+        table.add_column(i18n.t("col_ref"), style="bold cyan")
+        table.add_column(i18n.t("col_role"), style="bold #c084fc")
+        table.add_column(i18n.t("col_name"), style="#f8fafc")
+        table.add_column(i18n.t("col_state"), justify="center")
 
         for el in elements:
             ref = el.get("element_ref", "")
@@ -409,12 +473,85 @@ async def run_snapshot(
             elif role in ("checkbox", "radio"):
                 role_badge = f"[bold #f59e0b]{role}[/]"
 
-            table.add_row(f"[{ref}]", role_badge, str(name)[:44], state)
+            table.add_row(escape(f"[{ref}]"), role_badge, escape(str(name)[:44]), state)
 
         console.print(table)
     finally:
         if should_close:
             await services.close()
+            await asyncio.sleep(0.05)
+
+
+async def run_act(
+    cdp_port: int,
+    action: str,
+    element_ref: str,
+    value: Optional[str] = None,
+    page_id: Optional[str] = None,
+    i18n: Optional[I18n] = None,
+    services=None,
+) -> None:
+    should_close = False
+    i18n = i18n or I18n()
+    if services is None:
+        ensure_chrome_running(cdp_port, i18n)
+        from achilles.services.application import ApplicationServices
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        clean_ref = element_ref.strip("[]@")
+
+        if action in ("scroll", "rolar"):
+            direction = clean_ref.lower() if clean_ref in ("down", "up", "top", "bottom", "baixo", "cima", "topo", "fim") else "down"
+            amount = int(value) if value and value.isdigit() else 500
+            res = await services.call("browser_scroll", {
+                "direction": direction,
+                "amount": amount,
+                "page_id": page_id,
+            })
+            console.print(f"[bold green][✓] {i18n.t('scroll_success', direction=direction)}[/]")
+            return
+
+        # Snapshot first to register elements and acquire locator context
+        snap = await services.call("browser_snapshot", {"page_id": page_id, "limit": 200, "in_viewport_only": False})
+        active_page_id = snap.get("page_id")
+
+        # Smart element resolution: match exact ref, suffix (_N), 1-based index (N), or label name
+        matching_el = next((e for e in snap.get("elements", []) if e.get("element_ref") == clean_ref), None)
+        if not matching_el:
+            matching_el = next((e for e in snap.get("elements", []) if e.get("element_ref", "").endswith(f"_{clean_ref}")), None)
+        if not matching_el and clean_ref.isdigit():
+            idx = int(clean_ref) - 1
+            elements = snap.get("elements", [])
+            if 0 <= idx < len(elements):
+                matching_el = elements[idx]
+        if not matching_el:
+            matching_el = next((e for e in snap.get("elements", []) if clean_ref.lower() in (e.get("name") or "").lower()), None)
+
+        if matching_el:
+            clean_ref = matching_el["element_ref"]
+
+        action_args: Dict[str, Any] = {
+            "action": action,
+            "snapshot_id": snap["snapshot_id"],
+            "element_ref": clean_ref,
+            "page_id": active_page_id,
+            "timeout_ms": 5000,
+        }
+        if value is not None:
+            action_args["value"] = value
+
+        console.print(f"[bold #a855f7][*][/] Executando [bold cyan]{action}[/] em [cyan]{clean_ref}[/]...")
+        res = await services.call("browser_action", action_args)
+        duration = res.get("duration_ms", 0)
+        console.print(f"[bold green][✓] Sucesso:[/] Ação '{action}' executada em {duration}ms!")
+    except Exception as exc:
+        console.print(f"[bold red]❌ Falha ao executar ação:[/] {exc}")
+    finally:
+        if should_close:
+            await services.close()
+            await asyncio.sleep(0.05)
 
 
 async def run_traffic(cdp_port: int, i18n: I18n, page_id: Optional[str] = None, limit: int = 50, services=None) -> None:
@@ -466,6 +603,28 @@ async def run_traffic(cdp_port: int, i18n: I18n, page_id: Optional[str] = None, 
     finally:
         if should_close:
             await services.close()
+            await asyncio.sleep(0.05)
+
+
+async def run_curl(cdp_port: int, request_id: str, shell: str = "powershell", i18n: Optional[I18n] = None, services=None) -> None:
+    should_close = False
+    i18n = i18n or I18n()
+    if services is None:
+        ensure_chrome_running(cdp_port, i18n)
+        from achilles.services.application import ApplicationServices
+        services = ApplicationServices(cdp_port)
+        should_close = True
+
+    try:
+        res = await services.call("network_curl", {"request_id": request_id, "shell": shell})
+        curl_cmd = res.get("curl", "")
+        console.print(Panel(f"[bold #a855f7]{curl_cmd}[/]", title=f"[bold #c084fc]{i18n.t('curl_title')}[/]", border_style="#a855f7", box=box.ROUNDED))
+    except Exception as exc:
+        console.print(f"[bold red]❌ Falha ao gerar cURL:[/] {exc}")
+    finally:
+        if should_close:
+            await services.close()
+            await asyncio.sleep(0.05)
 
 
 async def run_audit(cdp_port: int, i18n: I18n, page_id: Optional[str] = None, services=None) -> None:
@@ -602,11 +761,11 @@ async def run_report(
 
         # Stealth panel
         stealth_info = (
-            "[bold green]✔ Chromium Automation Controlled Desativado[/] (--disable-blink-features=AutomationControlled)\n"
-            "[bold green]✔ Navigator Webdriver Mascarado[/] (undefined injetado em todas as abas e frames)\n"
-            "[bold green]✔ Canvas 2D & WebGL Stealth[/] (Ruído imperceptível de pixel + spoofing NVIDIA RTX 3060)\n"
+            "[bold green]✔ Chrome Nativo Genuíno (Zero-Detection)[/] (Sem flags de automação suspeitas)\n"
+            "[bold green]✔ Navigator Webdriver Limpo[/] (undefined nativo sem infobars do Chrome)\n"
+            "[bold green]✔ Canvas 2D & WebGL Stealth[/] (Ruído imperceptível de pixel + spoofing seguro)\n"
             "[bold green]✔ Web Audio API Stealth[/] (Micro-jitter em AudioBuffer contra fingerprinting acústico)\n"
-            "[bold green]✔ Floating In-Browser HUD[/] (Closed Shadow DOM isolado com status colaborativo)\n"
+            "[bold green]✔ Native Title Bar HUD[/] (Fora do DOM/HTML, ancorado ao lado do minimizar do Windows)\n"
             "[bold green]✔ Perfil Persistente de Usuário Ativo[/] (Cookies, logins e sessões preservados)\n"
             "[bold green]✔ Redação Zero-Secret Ativa[/] (Senhas, Bearer tokens e chaves mascarados)"
         )

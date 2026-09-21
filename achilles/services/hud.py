@@ -134,15 +134,30 @@ HUD_SCRIPT = r"""({status, message}) => {
 }"""
 
 
+import os
+import sys
+
+from .native_hud import NativeHudOverlay
+
+
 class HudManager:
-    """Injeta e atualiza o Floating HUD no navegador."""
+    """Gerencia o Floating HUD do Achilles (Native Title Bar Overlay no Windows, fora do HTML)."""
 
     @staticmethod
-    async def update(page: "Page", status: str = "idle", message: str = "") -> bool:
-        if page.is_closed():
-            return False
-        try:
-            return bool(await page.evaluate(HUD_SCRIPT, {"status": status, "message": message}))
-        except Exception as exc:
-            LOG.debug("Falha ao atualizar HUD no Chrome: %s", exc)
-            return False
+    async def update(page: Optional["Page"] = None, status: str = "idle", message: str = "") -> bool:
+        # 1. Atualiza o Overlay Nativo fora do HTML (na barra de título do Chrome, ao lado do botão minimizar)
+        if sys.platform == "win32":
+            try:
+                NativeHudOverlay.get_instance().update(status=status, message=message)
+            except Exception as exc:
+                LOG.debug("Falha ao atualizar Native HUD: %s", exc)
+
+        # 2. Se o usuário explicitamente ativar in-DOM HUD via env var (fallback opcional):
+        if os.environ.get("ACHILLES_DOM_HUD", "").lower() in ("1", "true", "yes"):
+            if page and not page.is_closed():
+                try:
+                    await page.evaluate(HUD_SCRIPT, {"status": status, "message": message})
+                except Exception as exc:
+                    LOG.debug("Falha ao atualizar fallback HUD no DOM: %s", exc)
+
+        return True

@@ -1,16 +1,14 @@
-# Python
+# ==============================================================================
+# Achilles CDP Agent — .gitignore
+# ==============================================================================
+
+# --- Python Bytecode & Artifacts ---
 __pycache__/
 *.py[cod]
-*.class
+*$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-.venv39/
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -20,33 +18,79 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Playwright & Testing
+# --- Virtual Environments ---
+.venv/
+.venv*/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Build & Distribution ---
+build/
+dist/
+*.manifest
+
+# --- Testing & Code Quality ---
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 test-results/
+.ruff_cache/
+.mypy_cache/
+nosetests.xml
+coverage.xml
+*.cover
 
-# Environment & Secrets
+# --- Logs & Runtime Databases ---
+*.log
+*.sqlite
+*.db
+domain_memory.json
+
+# --- Chrome Profiles & Runtime Sessions ---
+chrome_profile/
+achilles_profile/
+*.crx
+
+# --- Export Reports & Temporary Test Output ---
+*.html
+!templates/**/*.html
+*.jsonl
+achilles_demo_report.html
+relatorio_*.html
+report_*.html
+dashboard.html
+
+# --- Secrets & Local Configurations ---
 .env
 .env.local
 .env.*.local
 *.pem
 *.key
+*.pfx
+*.cert
 
-# IDE & OS
+# --- IDEs & System Files ---
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 .DS_Store
-Thumbs.db\n
-# Reoli Governance & System (Ignored)
-\!reoli/
-\!reoli
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- Reoli Workspace Governance (Local Agent Context) ---
 \!reoli/
 \!reoli
 AGENTS.md

@@ -20,6 +20,7 @@ a = Analysis(
         'playwright',
         'achilles.services.challenge_engine',
         'achilles.services.hud',
+        'achilles.services.native_hud',
         'achilles.services.domain_memory',
         'achilles.services.visual_report',
     ],

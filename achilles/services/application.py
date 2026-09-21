@@ -262,7 +262,7 @@ class ApplicationServices:
             out_path = args.get("output_path")
             if out_path:
                 filepath = export_report_to_file(report_data, out_path)
-                return {"exported": True, "filepath": filepath}
+                return {"exported": True, "filepath": filepath, "report_path": filepath}
             html = generate_html_report(report_data)
             return {"exported": True, "html": html}
         if name == "network_query":

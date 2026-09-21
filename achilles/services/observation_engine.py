@@ -473,6 +473,7 @@ class ObservationEngine:
                 "title": redact(extracted.get("title", "")),
                 "description": redact(extracted.get("description", "")),
                 "markdown": redact(md),
+                "tokens_saved_percent": f"{saved_pct}%",
                 "metrics": {
                     "raw_html_chars": raw_chars,
                     "extracted_chars": content_chars,

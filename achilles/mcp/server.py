@@ -97,17 +97,34 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
         if len(encoded) > 1048576:
             truncated_ok = False
             result = response.get("result")
-            if isinstance(result, dict) and "structuredContent" in result:
-                sc = result["structuredContent"]
-                if isinstance(sc, dict) and "elements" in sc and isinstance(sc["elements"], list):
-                    orig_len = len(sc["elements"])
-                    sc["elements"] = [e for e in sc["elements"] if e.get("in_viewport")] or sc["elements"][:max(20, orig_len // 4)]
-                    sc["truncated_by_context_limit"] = True
-                    result["content"] = [{"type": "text", "text": json.dumps(sc, ensure_ascii=False)}]
-                    encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
-                    if len(encoded_candidate) <= 1048576:
-                        encoded = encoded_candidate
-                        truncated_ok = True
+            if isinstance(result, dict):
+                content = result.get("content")
+                if isinstance(content, list) and content and isinstance(content[0], dict) and "text" in content[0]:
+                    try:
+                        parsed = json.loads(content[0]["text"])
+                        if isinstance(parsed, dict) and "elements" in parsed and isinstance(parsed["elements"], list):
+                            parsed["elements"] = [e for e in parsed["elements"] if e.get("in_viewport")] or parsed["elements"][:30]
+                            parsed["truncated_by_context_limit"] = True
+                            content[0]["text"] = json.dumps(parsed, ensure_ascii=False)
+                            if "structuredContent" in result:
+                                result["structuredContent"] = parsed
+                            encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+                            if len(encoded_candidate) <= 1048576:
+                                encoded = encoded_candidate
+                                truncated_ok = True
+                    except Exception:
+                        pass
+                elif "structuredContent" in result:
+                    sc = result["structuredContent"]
+                    if isinstance(sc, dict) and "elements" in sc and isinstance(sc["elements"], list):
+                        orig_len = len(sc["elements"])
+                        sc["elements"] = [e for e in sc["elements"] if e.get("in_viewport")] or sc["elements"][:max(20, orig_len // 4)]
+                        sc["truncated_by_context_limit"] = True
+                        result["content"] = [{"type": "text", "text": json.dumps(sc, ensure_ascii=False)}]
+                        encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
+                        if len(encoded_candidate) <= 1048576:
+                            encoded = encoded_candidate
+                            truncated_ok = True
             if not truncated_ok:
                 error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
                 encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")

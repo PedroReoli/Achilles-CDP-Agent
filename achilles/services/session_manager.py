@@ -187,6 +187,7 @@ class BrowserSessionManager:
     ) -> None:
         if not 1 <= cdp_port <= 65535 or attempts < 1:
             raise ValueError("Porta ou número de tentativas inválido")
+        self.cdp_port = cdp_port
         self.cdp_url = f"http://127.0.0.1:{cdp_port}"
         self.journal = journal if journal is not None else TrafficJournal()
         self.registry = TargetRegistry()
@@ -295,6 +296,7 @@ class BrowserSessionManager:
         self._contexts.clear()
         self._pages.clear()
         self.registry = TargetRegistry()
+        await asyncio.sleep(0.05)
 
     async def connect(self) -> None:
         async with self._connection_lock():
@@ -307,6 +309,12 @@ class BrowserSessionManager:
 
             for attempt in range(self.attempts):
                 try:
+                    if attempt == 0:
+                        try:
+                            from achilles.cli.commands import ensure_chrome_running
+                            ensure_chrome_running(self.cdp_port)
+                        except Exception:
+                            pass
                     self._playwright = await async_playwright().start()
                     connect = self._playwright.chromium.connect_over_cdp
                     options: Dict[str, Any] = {"timeout": self.connect_timeout_ms}

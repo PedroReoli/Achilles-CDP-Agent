@@ -13,14 +13,14 @@
 
 <p align="center">
   <strong>O motor universal de navegação autônoma e colaborativa no Chrome para Agentes de IA.</strong><br>
-  <em>Multi-Surface Anti-Bot Stealth • Closed Shadow DOM HUD • ~95% Economia de Tokens • Zero Secret Leakage • MCP Nativo</em>
+  <em>Multi-Surface Anti-Bot Stealth • Native Title Bar HUD (Zero DOM Injection) • ~95% Economia de Tokens • Zero Secret Leakage • MCP Nativo</em>
 </p>
 
 <p align="center">
   <a href="#-principais-recursos"><img src="https://img.shields.io/badge/Python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-38bdf8?style=flat-square&logo=python" alt="Python"></a>
-  <a href="#-testes-automatizados"><img src="https://img.shields.io/badge/Tests-25%2F25%20Passing%20(100%25)-22c55e?style=flat-square&logo=checkmarx" alt="Tests"></a>
+  <a href="#-testes-automatizados"><img src="https://img.shields.io/badge/Tests-30%2F30%20Passing%20(100%25)-22c55e?style=flat-square&logo=checkmarx" alt="Tests"></a>
   <a href="#-integração-mcp"><img src="https://img.shields.io/badge/MCP%20Protocol-Compatible-a855f7?style=flat-square" alt="MCP"></a>
-  <a href="#-multi-surface-stealth"><img src="https://img.shields.io/badge/Anti--Bot-Multi--Surface%20Stealth-c084fc?style=flat-square" alt="Stealth"></a>
+  <a href="#-multi-surface-stealth"><img src="https://img.shields.io/badge/Anti--Bot-Zero--Detection%20Stealth-c084fc?style=flat-square" alt="Stealth"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-f59e0b?style=flat-square" alt="License"></a>
 </p>
 
@@ -30,7 +30,7 @@
 
 O **Achilles CDP Agent** conecta agentes de inteligência artificial (como Claude Code, Gemini CLI, Cursor, Windsurf ou scripts autônomos) a uma instância real do Google Chrome via **Chrome DevTools Protocol (CDP)**.
 
-Diferente de frameworks tradicionais que tentam substituir o navegador por instâncias descartáveis e fáceis de detectar, o Achilles adota uma **filosofia colaborativa**: ele utiliza um perfil de usuário persistente, protege a identidade do navegador contra bloqueios anti-bot em múltiplas superfícies (Canvas, WebGL, Áudio) e trabalha junto com o usuário através de um **HUD flutuante in-browser**.
+Diferente de frameworks tradicionais que tentam substituir o navegador por instâncias descartáveis e fáceis de detectar, o Achilles adota uma **filosofia colaborativa**: ele utiliza um perfil de usuário persistente, protege a identidade do navegador contra bloqueios anti-bot em múltiplas superfícies (Canvas, WebGL, Áudio) e trabalha junto com o usuário através de um **HUD nativo fixado na barra de título do Chrome**.
 
 ---
 
@@ -41,18 +41,19 @@ Diferente de frameworks tradicionais que tentam substituir o navegador por inst�
 * Extrai o miolo semântico da página em Markdown limpo estruturado (`h1`-`h6`, parágrafos, listas, tabelas, links).
 * **Economia real de 95% a 98% dos tokens** por página em comparação ao HTML bruto.
 
-### 2. 🛡️ Multi-Surface Stealth (Anti-Fingerprinting)
-* **Chromium C++**: Flag `--disable-blink-features=AutomationControlled` ativada nativamente.
-* **Navigator Webdriver**: Mascarado como `undefined` em todos os contextos e frames.
+### 2. 🛡️ Multi-Surface Stealth (Zero-Detection Anti-Bot)
+* **Chrome Nativo Genuíno**: Inicialização limpa sem sinalizadores de linha de comando que disparam infobars de aviso (`AutomationControlled`).
+* **Navigator Webdriver**: Mascarado nativamente como `undefined` em todos os contextos e frames.
 * **Canvas 2D**: Injeção de micro-ruído imperceptível de pixel em `getImageData` que invalida hashes de canvas fingerprinting.
 * **WebGL Spoofing**: Simulação de GPU autêntica NVIDIA GeForce RTX 3060 via `WEBGL_debug_renderer_info`.
 * **Web Audio API Jitter**: Micro-ruído acústico em `AudioBuffer.getChannelData`.
 * **Cadência Humana**: Digitação sequencial (`press_sequentially`) com ritmo e delays naturais em inputs.
 
-### 3. 🔮 Floating In-Browser HUD Overlay
-* Injetado no Chrome via **Closed Shadow DOM** (`#__achilles_hud_host__`).
-* **Zero poluição de DOM**: Não interfere no CSS da aplicação nem quebra frameworks como React, Vue ou Tailwind.
-* Pill moderna com blur glassmórfico exibindo o status em tempo real:
+### 3. 🔮 Native Title Bar HUD Overlay (Zero DOM Injection)
+* Ancorado fora da página web, **diretamente na barra de título do Chrome**, ao lado dos botões do Windows (`_` `□` `✕`).
+* **Zero Footprint no DOM**: Nenhum elemento HTML, script ou host CSS é inserido nas páginas visitadas. Scripts anti-bot e sites bancários não conseguem detectar a presença do agente.
+* Sincronização automática com a posição e estado da janela do Chrome (minimizar, mover, restaurar).
+* Pill moderna com visual glassmórfico escuro exibindo o status em tempo real:
   - 🟢 **`idle`**: Agente pronto para cooperar.
   - 🟣 **`acting`**: Agente clicando, digitando ou navegando.
   - 🟡 **`waiting_human`**: Agente aguardando você resolver um desafio ou login.
@@ -98,7 +99,7 @@ graph TD
 
     subgraph ChromeRuntime ["Google Chrome (Perfil Persistente)"]
         CDP["Chrome DevTools Protocol (:9222)"]
-        HUD["🔮 Closed Shadow DOM HUD Pill"]
+        HUD["🔮 Native Title Bar HUD (Zero DOM Injection)"]
         Pages["Abas, Frames & Sessões Ativas"]
     end
 
@@ -115,7 +116,7 @@ graph TD
     AppSvc --> Stealth
     AppSvc --> Redact
     AppSvc --> CDP
-    CDP --> HUD
+    AppSvc --> HUD
     CDP --> Pages
     User -.->|Interage no Chrome / 2FA| Pages
 ```
@@ -177,10 +178,14 @@ O Achilles disponibilizará automaticamente 17 ferramentas padronizadas para a s
 | Comando | Descrição |
 |---|---|
 | `achilles` ou `achilles interactive` | Inicia o console REPL interativo com visual dark-mode e banner |
-| `achilles read` | Extrai o conteúdo em Markdown limpo (Reader Mode) |
+| `achilles open <url>` | Abre ou navega uma aba do Chrome para a URL informada |
+| `achilles status` | Exibe métricas de sessão, porta CDP e status do Chrome |
+| `achilles read` | Extrai o conteúdo em Markdown limpo (Reader Mode, ~95% economia de tokens) |
 | `achilles snapshot --limit 50` | Lista elementos interativos `[@ref]` visíveis no viewport |
-| `achilles act click <ref>` | Executa clique em um elemento pelo seu ID de referência |
+| `achilles act click <ref>` | Executa clique em um elemento pelo seu ID de referência ou índice |
 | `achilles act fill <ref> "<texto>"` | Digita texto com cadência humana |
+| `achilles act scroll <down\|up> [px]` | Rola a página suavemente na direção informada |
+| `achilles curl <request_id>` | Gera comando cURL reproduzível com redação de segredos |
 | `achilles wait-challenge` | Aguarda o usuário resolver Cloudflare, CAPTCHA ou 2FA |
 | `achilles memory [dominio]` | Consulta atalhos e memórias de rotas do domínio |
 | `achilles export-report` | Gera dashboard HTML executivo da sessão |
@@ -197,7 +202,7 @@ O Achilles disponibilizará automaticamente 17 ferramentas padronizadas para a s
 O projeto conta com suíte de testes unitários e de integração de ponta a ponta com o Chromium:
 
 ```powershell
-# Executa todos os testes unitários (25 testes)
+# Executa todos os testes unitários (30 testes, 100% de aprovação)
 python -m unittest discover tests -v
 
 # Executa teste de integração real com navegador Chromium

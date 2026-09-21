@@ -26,31 +26,7 @@ def port(value: str) -> int:
     return number
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    if argv is None:
-        raw_args = sys.argv[1:]
-    else:
-        raw_args = list(argv)
-
-    # Suporte nativo ao modo autônomo imediato via `achilles --ai`
-    if "--ai" in raw_args:
-        from achilles.cli.commands import run_protocol
-        lang = "pt"
-        if "-l" in raw_args:
-            idx = raw_args.index("-l")
-            if idx + 1 < len(raw_args):
-                lang = raw_args[idx + 1]
-        elif "--lang" in raw_args:
-            idx = raw_args.index("--lang")
-            if idx + 1 < len(raw_args):
-                lang = raw_args[idx + 1]
-        run_protocol(lang=lang)
-        return
-
-    # Se chamado sem argumentos (ex: apenas `achilles`), abre o modo interativo por padrão
-    if not raw_args:
-        raw_args = ["interactive"]
-
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="achilles", description="Achilles — Chrome CDP Autonomous Agent & Security Suite"
     )
@@ -110,12 +86,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     proto_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
     # 8. Act
-    act_p = commands.add_parser("act", help="Executa ação (click, fill, hover, press, select)")
-    act_p.add_argument("action", choices=["click", "fill", "hover", "press", "select"])
+    act_p = commands.add_parser("act", help="Executa ação (click, fill, hover, press, select, scroll)")
+    act_p.add_argument("action", choices=["click", "fill", "hover", "press", "select", "scroll"])
     act_p.add_argument("element_ref", type=str)
     act_p.add_argument("value", nargs="?", default=None)
     act_p.add_argument("--page-id", type=str, default=None)
     act_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    act_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
     # 9. Traffic
     traffic_p = commands.add_parser("traffic", help="Lista requisições HTTP capturadas")
@@ -129,6 +106,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     curl_p.add_argument("request_id", type=str)
     curl_p.add_argument("--shell", choices=["posix", "powershell"], default="powershell" if sys.platform == "win32" else "posix")
     curl_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    curl_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
     # 11. Audit
     audit_p = commands.add_parser("audit", help="Executa auditoria de postura OWASP e segurança")
@@ -171,6 +149,35 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     exp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     exp_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    if argv is None:
+        raw_args = sys.argv[1:]
+    else:
+        raw_args = list(argv)
+
+    # Suporte nativo ao modo autônomo imediato via `achilles --ai`
+    if "--ai" in raw_args:
+        from achilles.cli.commands import run_protocol
+        lang = "pt"
+        if "-l" in raw_args:
+            idx = raw_args.index("-l")
+            if idx + 1 < len(raw_args):
+                lang = raw_args[idx + 1]
+        elif "--lang" in raw_args:
+            idx = raw_args.index("--lang")
+            if idx + 1 < len(raw_args):
+                lang = raw_args[idx + 1]
+        run_protocol(lang=lang)
+        return
+
+    # Se chamado sem argumentos (ex: apenas `achilles`), abre o modo interativo por padrão
+    if not raw_args:
+        raw_args = ["interactive"]
+
+    parser = build_parser()
     args = parser.parse_args(raw_args)
 
     try:
@@ -183,7 +190,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif args.command == "status":
             from achilles.cli.commands import run_status
             from achilles.cli.i18n import I18n
-            asyncio.run(run_status(args.cdp_port))
+            asyncio.run(run_status(args.cdp_port, I18n(getattr(args, "lang", None))))
         elif args.command == "pages":
             from achilles.cli.commands import run_pages
             from achilles.cli.i18n import I18n
@@ -229,14 +236,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
         elif args.command == "act":
             from achilles.cli.commands import run_act
-            asyncio.run(run_act(args.cdp_port, args.action, args.element_ref, args.value, args.page_id))
+            from achilles.cli.i18n import I18n
+            asyncio.run(run_act(args.cdp_port, args.action, args.element_ref, args.value, args.page_id, I18n(getattr(args, "lang", None))))
         elif args.command == "traffic":
             from achilles.cli.commands import run_traffic
             from achilles.cli.i18n import I18n
             asyncio.run(run_traffic(args.cdp_port, I18n(getattr(args, "lang", None)), args.page_id, args.limit))
         elif args.command == "curl":
             from achilles.cli.commands import run_curl
-            asyncio.run(run_curl(args.cdp_port, args.request_id, args.shell))
+            from achilles.cli.i18n import I18n
+            asyncio.run(run_curl(args.cdp_port, args.request_id, args.shell, I18n(getattr(args, "lang", None))))
         elif args.command == "audit":
             from achilles.cli.commands import run_audit
             from achilles.cli.i18n import I18n
