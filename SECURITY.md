@@ -1,33 +1,18 @@
-# Política de Segurança — Achilles CDP Agent
+# Política de segurança
 
-O **Achilles CDP Agent** conecta agentes autônomos de IA e desenvolvedores a sessões ativas do Google Chrome/Chromium via Chrome DevTools Protocol (CDP). Por lidar com credenciais, cookies e sessões de usuários reais em navegação compartilhada, a segurança e a privacidade são pilares inegociáveis.
+O Achilles controla sessões de navegador e pode observar páginas autenticadas. Trate o perfil CDP, os resultados das ferramentas e os relatórios exportados como dados potencialmente sensíveis.
 
----
+## Reportar uma vulnerabilidade
 
-## 🛡️ Nosso Compromisso: Zero Secret Leakage
+Use [GitHub Security Advisories](https://github.com/PedroReoli/Achilles-CDP-Agent/security/advisories/new) para enviar o relato de forma privada ou escreva para `security@reoli.org`. Evite issues públicas com tokens, cookies, URLs privadas ou passos que exponham uma sessão real. Inclua versão, sistema operacional, passos reproduzíveis em perfil descartável e impacto observado. O mantenedor avaliará o relato antes de uma divulgação pública.
 
-1. **Redação Recursiva Ativa:** Toda informação trafegada através de requisições (`network_query`), exportações (`network_curl`, `network_postman`) e árvores de observação (`browser_snapshot`) passa por sanitização automática contra mais de 10 classes de segredos (JWT, API keys, tokens de sessão, credenciais bancárias e dados de formulários sensíveis).
-2. **Loopback Estrito:** O REST Bridge do Achilles e o servidor MCP stdio foram desenhados para aceitar apenas conexões originadas do loopback local (`127.0.0.1`, `::1`), protegidas por tokens de autenticação Bearer gerados com entropia criptográfica (`secrets.token_urlsafe(32)`).
-3. **Bloqueio de Origens Externas e Esquemas Sensíveis:** O acesso cross-origin via browser é explicitamente bloqueado (`BROWSER_ORIGIN_BLOCKED`) e esquemas de arquivos locais (`file://`) ou internos (`chrome://`) são desativados por padrão para prevenir ataques de Local File Disclosure (LFD) ou SSRF induzidos por prompt injection.
+## Limites de confiança
 
----
+- **CDP:** o endpoint de depuração dá amplo controle sobre o perfil conectado. Mantenha-o em `127.0.0.1`, use um perfil dedicado e não exponha a porta à rede. Acesso local à máquina também deve ser tratado como sensível.
+- **REST:** `achilles start` escuta em `127.0.0.1`, exige Bearer token e valida peer, Host e Origin. `ACHILLES_API_TOKEN` pode definir o token; sem ele, um token aleatório é mostrado no stderr ao iniciar. Não compartilhe o token.
+- **MCP:** `achilles mcp` comunica-se por stdio com o processo cliente. Ele não abre listener HTTP nem aplica o Bearer token do REST. Configure apenas clientes MCP confiáveis.
+- **Favoritos:** a extensão `Achilles Browser Bridge` pede permissão de leitura e escrita dos favoritos do perfil em que for instalada. Ela não recebe mensagens de sites. Instale-a somente no perfil que deseja controlar.
+- **Redação:** URLs, tráfego e relatórios passam por regras para segredos conhecidos. Esse filtro é de melhor esforço e não garante remoção de todo dado confidencial, especialmente conteúdo arbitrário de páginas. Revise resultados antes de compartilhá-los.
+- **Navegação:** a ferramenta de navegação aceita `http`, `https` e `about`; o navegador ainda pode alcançar outros conteúdos por interações na página. A auditoria de segurança é passiva e não substitui uma avaliação completa.
 
-## 🚨 Como Reportar Vulnerabilidades
-
-Se você identificou uma vulnerabilidade de segurança, **não abra uma issue pública**. 
-
-Por favor, relate o incidente de forma privada:
-- **E-mail:** `security@reoli.org` ou diretamente ao mantenedor via [GitHub Security Advisories](https://github.com/PedroReoli/Achilles-CDP-Agent/security/advisories/new).
-- Inclua detalhes como:
-  - Descrição da vulnerabilidade e passos reproduzíveis (PoC).
-  - Versão do Achilles CDP Agent e versão do Python/Chrome utilizada.
-  - Impacto potencial no isolamento do navegador ou vazamento de contexto.
-
-Responderemos em até **48 horas úteis** confirmando o recebimento e coordenando a correção e divulgação responsável.
-
----
-
-## 🔒 Boas Práticas ao Usar o Achilles
-
-- **Perfil Dedicado:** Embora o Achilles suporte perfil persistente para salvar logins em sessões de trabalho, recomendamos utilizar perfis dedicados de automação caso vá executar agentes 100% autônomos sem supervisão humana.
-- **Tokens de API:** Nunca versione seu `ACHILLES_API_TOKEN` ou compartilhe sua porta de depuração remota com interfaces expostas à internet (`0.0.0.0`).
+Testes de integração usam perfis temporários e servidores locais. Não execute testes ou exemplos de automação mutável em um perfil pessoal sem revisar os comandos.

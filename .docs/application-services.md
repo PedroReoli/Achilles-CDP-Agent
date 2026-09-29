@@ -10,21 +10,28 @@ python -m achilles start --cdp-port 9333 --port 8765
 python -m achilles mcp --cdp-port 9333
 ```
 
-O Chrome precisa ter CDP habilitado nessa porta, com perfil de depuração próprio. O Achilles apenas conecta; não cria abas ou inicia o navegador automaticamente. `BrowserSessionManager.close()` encerra o transporte Playwright sem chamar `Browser.close()` ou `BrowserContext.close()`.
+O Achilles conecta ao Chrome ou Edge pelo Playwright sobre CDP. Se a porta estiver fechada, a primeira operação que precisa do navegador tenta iniciar o executável configurado com perfil persistente próprio, fora do loop stdio. `browser_status` e o handshake MCP não iniciam o navegador. `BrowserSessionManager.close()` encerra o transporte Playwright sem chamar `Browser.close()` ou `BrowserContext.close()`; o navegador iniciado para uso persistente permanece disponível.
 
-No REST, configure `ACHILLES_API_TOKEN` no ambiente ou use o token aleatório exibido uma vez no stderr ao iniciar. Todos os endpoints, incluindo documentação, exigem `Authorization: Bearer <token>`. O listener da CLI aceita somente `127.0.0.1`, desabilita proxy headers e limita conexões concorrentes. A aplicação verifica peer, Host, Origin e limita corpos a 1 MiB. Tokens devem ser distintos por instalação/processo.
+`ACHILLES_BROWSER=edge` seleciona o executável e o perfil persistente do Edge para partida automática. Uma porta CDP já aberta prevalece sobre essa seleção. Operações de favoritos usam a extensão `Achilles Browser Bridge` no perfil conectado; consulte [instalação e limites](browser-bookmarks.md).
+
+No REST, configure `ACHILLES_API_TOKEN` no ambiente ou use o token aleatório exibido uma vez no stderr ao iniciar. Todos os endpoints disponíveis exigem `Authorization: Bearer <token>`. O listener da CLI aceita somente `127.0.0.1`, desabilita proxy headers e limita conexões concorrentes. A aplicação verifica peer, Host, Origin e limita corpos a 1 MiB. Tokens devem ser distintos por instalação/processo.
 
 ## Contrato compartilhado
 
 `GET /api/tools.json` e MCP `tools/list` retornam o mesmo catálogo. Cada operação REST é `POST /api/tools/{name}`; o corpo é o objeto `arguments` da tool MCP.
 
-| Operação | Argumentos |
+| Operação principal | Argumentos |
 | --- | --- |
 | `browser_status` | `{}` |
 | `browser_list_pages` | `{}` |
 | `browser_select_page` | `page_id` |
 | `browser_snapshot` | `page_id?`, `limit?` (1–1000) |
 | `browser_action` | `action`, `page_id`, `snapshot_id`, `element_ref`, `value?`, `timeout_ms?` |
+| `browser_bookmarks_list` | `parent_id?`, `limit?` (1–500) |
+| `browser_bookmarks_search` | `query`, `limit?` (1–500) |
+| `browser_bookmarks_create` | `title`, `url`, `parent_id?` |
+| `browser_bookmarks_update` | `id`, `title?`, `url?` |
+| `browser_bookmarks_remove` | `id` |
 | `network_query` | `page_id?`, `limit?` (1–500) |
 | `network_curl` | `request_id`, `shell?` (`posix` ou `powershell`) |
 | `network_postman` | `{}` |
@@ -69,9 +76,9 @@ JWTs são decodificados, não validados criptograficamente. HS256 isolado não �
 
 ## MCP e migração
 
-O servidor stdio implementa initialize, initialized, ping, tools/list, tools/call e cancellation. Não responde a notifications. Suporta negociação `2025-06-18` e `2024-11-05`; structuredContent/outputSchema são usados na versão mais nova. O transporte limita mensagens a 1 MiB e concorrência a 32 requisições. Stdout contém exclusivamente JSON-RPC UTF-8. A implementação nativa permite preservar Python 3.9 sem depender do SDK MCP atual, que exige Python 3.10.
+O servidor stdio implementa duas eras de protocolo. A legada usa `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call` e cancelamento nas versões `2024-11-05`, `2025-06-18` e `2025-11-25`. A era `2026-07-28` usa `server/discover` ou chamada direta com versão e capacidades em `params._meta`, sem handshake; as respostas incluem `resultType` e identidade em `_meta`. A seleção de era vale para a conexão stdio, enquanto a versão moderna é conferida em cada requisição. O transporte limita mensagens a 1 MiB e concorrência a 32 requisições. Stdout contém exclusivamente JSON-RPC UTF-8. O servidor MCP é implementado no projeto para preservar Python 3.9 sem acrescentar o SDK MCP como dependência.
 
-Referência: [MCP lifecycle](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle).
+Referências: [ciclo de vida legado](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle) e [descoberta 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/server/discover.mdx).
 
 Esta é uma mudança de contrato major. IDs inteiros antigos foram substituídos por referências versionadas. As quatro tools MCP antigas dão lugar ao catálogo acima. Os aliases REST `/api/dom/tree`, `/api/security/audit`, `/api/routes/apis`, `/api/routes/postman`, `/api/status` e `/api/action/{action}` delegam ao catálogo novo.
 
@@ -88,6 +95,6 @@ python -m unittest discover tests -v
 
 Os testes de navegador iniciam Chromium descartável com porta dinâmica e um servidor HTTP local. Exercitam concorrência de conexão, substituição de nó, ação bloqueada, fill/press/select/hover/click, Shadow DOM, frames aninhados, headers reais, body redigido, seleção de abas, preservação de navegador e reconexão após reinício.
 
-Validação local: 15 testes passaram em Python 3.9.25/Playwright 1.58 e Python 3.11/Playwright 1.62. O lint é configurado para sintaxe 3.9. Os 12 módulos de serviços/transporte passaram no mypy 1.18.2 com dependências do ambiente 3.9.
+O CI executa testes unitários e lint em Python 3.9 a 3.12 no Windows e Linux. Um job separado roda o teste isolado com Chromium nos dois sistemas em Python 3.12. O lint é configurado para sintaxe 3.9. Para medição local de latência e tamanho de payloads, consulte [benchmark.md](benchmark.md).
 
 Dez inicializações `python -m achilles --help` no ambiente 3.11: mediana 96,6 ms, máximo 104,8 ms. Isso mede a CLI Python, não o bootloader do executável PyInstaller. O binário antigo em dist não foi reconstruído por esta refatoração e ainda não incorpora os novos serviços. Compatibilidade Linux/macOS e assinatura de releases não foram homologadas neste trabalho.
