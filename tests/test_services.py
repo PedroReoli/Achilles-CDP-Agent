@@ -7,7 +7,14 @@ import unittest
 from unittest.mock import AsyncMock
 
 from achilles.api.server import create_app
-from achilles.mcp.server import MCPServer
+from achilles.mcp.server import (
+    CAPABILITIES_META,
+    MODERN_VERSION,
+    SERVER_INFO_META,
+    VERSION_META,
+    MCPServer,
+    encode_response,
+)
 from achilles.services.application import ApplicationServices
 from achilles.services.errors import ServiceError
 from achilles.services.security_engine import SecurityAuditEngine
@@ -58,8 +65,9 @@ class JournalTests(unittest.TestCase):
         self.assertIn("private-body", r["request_body"])
 
     def test_network_redaction_fuzzing(self) -> None:
-        from achilles.services.redaction import redact_body, redact
         import base64
+
+        from achilles.services.redaction import redact, redact_body
 
         # Test headers and dict redaction
         headers = {
@@ -166,6 +174,70 @@ class SecurityTests(unittest.TestCase):
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mcp_modern_discovery_and_inline_tool_call(self) -> None:
+        app = ApplicationServices(9333)
+        server = MCPServer(app)
+        metadata = {VERSION_META: MODERN_VERSION, CAPABILITIES_META: {}}
+        discovery = await server.handle({
+            "jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": metadata},
+        })
+        self.assertEqual(discovery["result"]["resultType"], "complete")
+        self.assertIn(MODERN_VERSION, discovery["result"]["supportedVersions"])
+        self.assertEqual(discovery["result"]["_meta"][SERVER_INFO_META]["name"], "achilles-cdp")
+        listing = await server.handle({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": metadata},
+        })
+        self.assertEqual(listing["result"]["resultType"], "complete")
+        self.assertTrue(listing["result"]["tools"])
+        self.assertEqual(listing["result"]["cacheScope"], "public")
+        self.assertEqual(listing["result"]["ttlMs"], 300000)
+        status = await server.handle({
+            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+            "params": {"_meta": metadata, "name": "browser_status", "arguments": {}},
+        })
+        self.assertEqual(status["result"]["structuredContent"]["cdp_url"], "http://127.0.0.1:9333")
+        self.assertEqual(status["result"]["resultType"], "complete")
+        missing = await server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
+        self.assertEqual(missing["error"]["code"], -32602)
+        unsupported = await MCPServer(app).handle({
+            "jsonrpc": "2.0", "id": 5, "method": "server/discover",
+            "params": {"_meta": {VERSION_META: "1900-01-01", CAPABILITIES_META: {}}},
+        })
+        self.assertEqual(unsupported["error"]["code"], -32022)
+        self.assertEqual(unsupported["error"]["data"]["requested"], "1900-01-01")
+        await app.close()
+
+    async def test_mcp_lists_after_initialize_without_notification(self) -> None:
+        app = ApplicationServices(9333)
+        for version in ("2024-11-05", "2025-06-18"):
+            server = MCPServer(app)
+            before = await server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+            self.assertEqual(before["error"]["code"], -32002)
+            handshake = await server.handle({
+                "jsonrpc": "2.0", "id": 2, "method": "initialize",
+                "params": {"protocolVersion": version},
+            })
+            self.assertEqual(handshake["result"]["protocolVersion"], version)
+            listing = await server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+            self.assertTrue(listing["result"]["tools"])
+            self.assertEqual("outputSchema" in listing["result"]["tools"][0], version != "2024-11-05")
+        await app.close()
+
+    def test_mcp_large_reader_payload_stays_valid_json(self) -> None:
+        payload = {"markdown": "á" * 700000, "elements": []}
+        response = {"jsonrpc": "2.0", "id": 5, "result": {
+            "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}],
+            "structuredContent": payload,
+        }}
+        encoded = encode_response(response)
+        self.assertLessEqual(len(encoded), 1048576)
+        parsed = json.loads(encoded)
+        self.assertEqual(
+            json.loads(parsed["result"]["content"][0]["text"]),
+            parsed["result"]["structuredContent"],
+        )
+        self.assertTrue(parsed["result"]["structuredContent"]["truncated_by_context_limit"])
+
     async def test_mcp_catalog_parity_validation_and_notifications(self) -> None:
         app = ApplicationServices(9333)
         server = MCPServer(app)
@@ -213,6 +285,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
     def test_mcp_backpressure(self) -> None:
         import asyncio
+
         from achilles.mcp.server import MCPServer
         from achilles.services.application import ApplicationServices
 
@@ -271,6 +344,39 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProcessTests(unittest.TestCase):
+    def test_mcp_modern_stdio_without_handshake(self) -> None:
+        metadata = {VERSION_META: MODERN_VERSION, CAPABILITIES_META: {}}
+        requests = [
+            {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": metadata}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": metadata}},
+        ]
+        result = subprocess.run(
+            [sys.executable, "-m", "achilles", "mcp", "--cdp-port", "9555"],
+            input="\n".join(json.dumps(req) for req in requests) + "\n",
+            text=True, capture_output=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        responses = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([row["id"] for row in responses], [1, 2])
+        self.assertEqual(responses[0]["result"]["resultType"], "complete")
+        self.assertTrue(responses[1]["result"]["tools"])
+
+    def test_mcp_stdio_partial_handshake_and_oversized_input(self) -> None:
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ]
+        stream = "\n".join(json.dumps(message) for message in messages[:1])
+        stream += "\n" + "x" * 1048577 + "\n" + json.dumps(messages[1]) + "\n"
+        result = subprocess.run(
+            [sys.executable, "-m", "achilles", "mcp", "--cdp-port", "9555"],
+            input=stream, text=True, capture_output=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        responses = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([row.get("id") for row in responses], [1, None, 2])
+        self.assertTrue(responses[-1]["result"]["tools"])
+
     def test_help_does_not_load_heavy_dependencies(self) -> None:
         code = "import sys; from achilles.cli.app import main;\ntry: main(['--help'])\nexcept SystemExit: pass\nassert not any(x in sys.modules for x in ('playwright','pydantic','fastapi','uvicorn'))"
         result = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=10)
@@ -372,6 +478,7 @@ class AdvancedModulesV21Tests(unittest.TestCase):
     def test_domain_memory_engine(self) -> None:
         import tempfile
         from pathlib import Path
+
         from achilles.services.domain_memory import DomainMemoryEngine
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -413,6 +520,7 @@ class AdvancedModulesV21Tests(unittest.TestCase):
     def test_visual_report_generation(self) -> None:
         import tempfile
         from pathlib import Path
+
         from achilles.services.visual_report import export_report_to_file, generate_html_report
 
         mock_data = {
@@ -452,6 +560,13 @@ class AdvancedModulesV21Tests(unittest.TestCase):
         self.assertIn("Achilles CDP Agent", html)
         self.assertIn("94.7%", html)
         self.assertIn("api.github.com", html)
+        mock_data["timeline"] = [{"at": 0, "operation": "browser_navigate", "duration_ms": 12}]
+        mock_data["request_history"] = [{"at": 0, "method": "GET", "url": "https://example.test/<script>", "status": 200}]
+        mock_data["challenge_history"] = [{"at": 0, "type": "turnstile", "status": "resolved"}]
+        html = generate_html_report(mock_data)
+        self.assertIn("Timeline da Sessão", html)
+        self.assertIn("resolved", html)
+        self.assertIn("&lt;script&gt;", html)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             out_file = Path(tmpdir) / "test_report.html"

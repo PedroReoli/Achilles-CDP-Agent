@@ -1,6 +1,7 @@
 """MCP stdio JSON-RPC para Python 3.9, sem dependência do SDK 3.10+."""
 
 import asyncio
+import copy
 import json
 import sys
 from typing import Any, Dict, Optional, Union
@@ -9,7 +10,58 @@ from achilles.services.application import ApplicationServices
 from achilles.services.errors import ServiceError
 
 RequestId = Union[str, int]
-VERSIONS = ("2025-06-18", "2024-11-05")
+MODERN_VERSION = "2026-07-28"
+LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2024-11-05")
+VERSIONS = (MODERN_VERSION,) + LEGACY_VERSIONS
+SERVER_INFO = {"name": "achilles-cdp", "version": "2.1.0"}
+VERSION_META = "io.modelcontextprotocol/protocolVersion"
+CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
+SERVER_INFO_META = "io.modelcontextprotocol/serverInfo"
+MAX_MESSAGE_BYTES = 1048576
+
+
+def encode_response(response: Dict[str, Any]) -> bytes:
+    """Limita a saída por estrutura, preservando JSON válido e conteúdo consistente."""
+    def encode(value: Dict[str, Any]) -> bytes:
+        return (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+    encoded = encode(response)
+    if len(encoded) <= MAX_MESSAGE_BYTES:
+        return encoded
+    result = response.get("result")
+    if not isinstance(result, dict) or not isinstance(result.get("content"), list):
+        return encode(MCPServer.error(response.get("id"), -32600, "Message too large for context window"))
+    candidate = copy.deepcopy(response)
+    result = candidate["result"]
+    payload = result.get("structuredContent")
+    if payload is None:
+        try:
+            payload = json.loads(result["content"][0]["text"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            payload = None
+    if payload is None:
+        return encode(MCPServer.error(response.get("id"), -32600, "Message too large for context window"))
+
+    def compact(value: Any, budget: int) -> Any:
+        if isinstance(value, str):
+            return value if len(value) <= budget else value[:budget] + "… [truncated]"
+        if isinstance(value, list):
+            return [compact(item, budget) for item in value[:max(1, budget // 256)]]
+        if isinstance(value, dict):
+            return {key: compact(item, budget) for key, item in value.items()}
+        return value
+
+    for budget in (65536, 16384, 4096, 1024, 256):
+        shortened = compact(payload, budget)
+        if isinstance(shortened, dict):
+            shortened["truncated_by_context_limit"] = True
+        result["content"] = [{"type": "text", "text": json.dumps(shortened, ensure_ascii=False)}]
+        if "structuredContent" in result:
+            result["structuredContent"] = shortened
+        encoded = encode(candidate)
+        if len(encoded) <= MAX_MESSAGE_BYTES:
+            return encoded
+    return encode(MCPServer.error(response.get("id"), -32600, "Message too large for context window"))
 
 
 class MCPServer:
@@ -17,11 +69,18 @@ class MCPServer:
         self.services = services
         self.initialized = False
         self.negotiated = False
-        self.version = VERSIONS[0]
+        self.version = LEGACY_VERSIONS[0]
+        self.era: Optional[str] = None
 
     @staticmethod
     def error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+    @staticmethod
+    def unsupported_version(request_id: Any, requested: Any) -> Dict[str, Any]:
+        response = MCPServer.error(request_id, -32022, "Unsupported protocol version")
+        response["error"]["data"] = {"supported": list(VERSIONS), "requested": requested}
+        return response
 
     async def handle(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         request_id = request.get("id")
@@ -32,56 +91,101 @@ class MCPServer:
         if not isinstance(params, dict):
             return self.error(request_id, -32602, "Invalid params") if "id" in request else None
         if "id" not in request:
-            if method == "notifications/initialized" and self.negotiated:
+            if method == "notifications/initialized" and self.era == "legacy":
                 self.initialized = True
             return None
         if not isinstance(request_id, (str, int)) or isinstance(request_id, bool):
             return self.error(None, -32600, "Invalid request id")
         result: Dict[str, Any]
+        modern = False
         if method == "initialize":
+            if self.era == "modern":
+                return self.error(request_id, -32600, "Protocol era already selected")
             proposed = params.get("protocolVersion")
-            self.version = proposed if proposed in VERSIONS else VERSIONS[0]
+            self.version = proposed if proposed in LEGACY_VERSIONS else LEGACY_VERSIONS[0]
             self.negotiated = True
+            self.era = "legacy"
             result = {
                 "protocolVersion": self.version,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "achilles-cdp", "version": "2.1.0"},
+                "serverInfo": SERVER_INFO,
             }
-        elif method == "ping":
+        elif method == "ping" and self.era != "modern":
             result = {}
-        elif not self.initialized:
-            return self.error(request_id, -32002, "Server not initialized")
-        elif method == "tools/list":
-            result = self.services.tools()
-            if self.version == "2024-11-05":
-                for tool in result["tools"]:
-                    tool.pop("outputSchema", None)
-                    tool.pop("annotations", None)
-        elif method == "tools/call":
-            name = params.get("name")
-            arguments = params.get("arguments", {})
-            if not isinstance(name, str) or not isinstance(arguments, dict):
-                return self.error(request_id, -32602, "Invalid tool arguments")
-            try:
-                data = await self.services.call(name, arguments)
-                result = {
-                    "content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False)}],
-                    "isError": False,
-                }
-                if self.version != "2024-11-05":
-                    result["structuredContent"] = data
-            except ServiceError as exc:
-                result = {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps({"error": exc.as_dict()}, ensure_ascii=False),
-                        }
-                    ],
-                    "isError": True,
-                }
         else:
-            return self.error(request_id, -32601, "Method not found")
+            metadata = params.get("_meta")
+            modern_request = method == "server/discover" or (
+                isinstance(metadata, dict) and VERSION_META in metadata
+            )
+            if modern_request:
+                if self.era == "legacy":
+                    return self.error(request_id, -32600, "Protocol era already selected")
+                if not isinstance(metadata, dict) or not isinstance(
+                    metadata.get(CAPABILITIES_META), dict
+                ):
+                    return self.error(request_id, -32602, "Missing modern protocol metadata")
+                requested = metadata.get(VERSION_META)
+                if requested != MODERN_VERSION:
+                    return self.unsupported_version(request_id, requested)
+                self.era = "modern"
+                modern = True
+            elif self.era == "modern":
+                return self.error(request_id, -32602, "Missing modern protocol metadata")
+            elif not self.negotiated:
+                return self.error(request_id, -32002, "Server not initialized")
+
+            if method == "server/discover":
+                result = {
+                    "supportedVersions": list(VERSIONS),
+                    "capabilities": {"tools": {}},
+                }
+            elif method == "tools/list":
+                result = self.services.tools()
+                if not modern and self.version == "2024-11-05":
+                    for tool in result["tools"]:
+                        tool.pop("outputSchema", None)
+                        tool.pop("annotations", None)
+            elif method == "tools/call":
+                name = params.get("name")
+                arguments = params.get("arguments", {})
+                if not isinstance(name, str) or not isinstance(arguments, dict):
+                    return self.error(request_id, -32602, "Invalid tool arguments")
+                try:
+                    data = await self.services.call(name, arguments)
+                    text_payload = data
+                    if (modern or self.version != "2024-11-05") and name == "browser_snapshot":
+                        text_payload = {
+                            key: data[key]
+                            for key in ("snapshot_id", "page_id", "compact", "warnings", "tokens_saved_percent")
+                            if key in data
+                        }
+                    elif (modern or self.version != "2024-11-05") and name == "browser_read_content":
+                        text_payload = {
+                            key: data[key]
+                            for key in ("page_id", "url", "title", "markdown", "tokens_saved_percent")
+                            if key in data
+                        }
+                    result = {
+                        "content": [{"type": "text", "text": json.dumps(text_payload, ensure_ascii=False)}],
+                        "isError": False,
+                    }
+                    if modern or self.version != "2024-11-05":
+                        result["structuredContent"] = data
+                except ServiceError as exc:
+                    result = {
+                        "content": [
+                            {"type": "text", "text": json.dumps({"error": exc.as_dict()}, ensure_ascii=False)}
+                        ],
+                        "isError": True,
+                    }
+            else:
+                return self.error(request_id, -32601, "Method not found")
+            if modern:
+                result["resultType"] = "complete"
+                result["_meta"] = {SERVER_INFO_META: SERVER_INFO}
+                if method in ("server/discover", "tools/list"):
+                    result["ttlMs"] = 300000
+                    result["cacheScope"] = "public"
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
@@ -92,42 +196,7 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
     output_lock = asyncio.Lock()
 
     async def write(response: Dict[str, Any]) -> None:
-        encoded = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
-        # Backpressure / Context Protection
-        if len(encoded) > 1048576:
-            truncated_ok = False
-            result = response.get("result")
-            if isinstance(result, dict):
-                content = result.get("content")
-                if isinstance(content, list) and content and isinstance(content[0], dict) and "text" in content[0]:
-                    try:
-                        parsed = json.loads(content[0]["text"])
-                        if isinstance(parsed, dict) and "elements" in parsed and isinstance(parsed["elements"], list):
-                            parsed["elements"] = [e for e in parsed["elements"] if e.get("in_viewport")] or parsed["elements"][:30]
-                            parsed["truncated_by_context_limit"] = True
-                            content[0]["text"] = json.dumps(parsed, ensure_ascii=False)
-                            if "structuredContent" in result:
-                                result["structuredContent"] = parsed
-                            encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
-                            if len(encoded_candidate) <= 1048576:
-                                encoded = encoded_candidate
-                                truncated_ok = True
-                    except Exception:
-                        pass
-                elif "structuredContent" in result:
-                    sc = result["structuredContent"]
-                    if isinstance(sc, dict) and "elements" in sc and isinstance(sc["elements"], list):
-                        orig_len = len(sc["elements"])
-                        sc["elements"] = [e for e in sc["elements"] if e.get("in_viewport")] or sc["elements"][:max(20, orig_len // 4)]
-                        sc["truncated_by_context_limit"] = True
-                        result["content"] = [{"type": "text", "text": json.dumps(sc, ensure_ascii=False)}]
-                        encoded_candidate = (json.dumps(response, ensure_ascii=False) + "\n").encode("utf-8")
-                        if len(encoded_candidate) <= 1048576:
-                            encoded = encoded_candidate
-                            truncated_ok = True
-            if not truncated_ok:
-                error_resp = server.error(response.get("id"), -32600, "Message too large for context window")
-                encoded = (json.dumps(error_resp, ensure_ascii=False) + "\n").encode("utf-8")
+        encoded = encode_response(response)
 
         async with output_lock:
             await asyncio.to_thread(sys.stdout.buffer.write, encoded)
@@ -157,12 +226,16 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
 
     try:
         while True:
-            line = await asyncio.to_thread(sys.stdin.buffer.readline, 1048577)
+            line = await asyncio.to_thread(sys.stdin.buffer.readline, MAX_MESSAGE_BYTES + 1)
             if not line:
                 break
-            if len(line) > 1048576:
+            if len(line) > MAX_MESSAGE_BYTES:
+                while not line.endswith(b"\n"):
+                    line = await asyncio.to_thread(sys.stdin.buffer.readline, MAX_MESSAGE_BYTES + 1)
+                    if not line:
+                        break
                 await write(server.error(None, -32600, "Message too large"))
-                break
+                continue
             try:
                 request = json.loads(line)
             except (ValueError, UnicodeError):
@@ -179,7 +252,7 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
                 continue
             request_id = request.get("id")
             if (
-                request.get("method") in ("initialize", "notifications/initialized")
+                request.get("method") in ("initialize", "server/discover", "notifications/initialized")
                 or "id" not in request
             ):
                 await dispatch(request)
