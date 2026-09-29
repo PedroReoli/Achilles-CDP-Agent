@@ -177,7 +177,7 @@ O servidor MCP usa stdio e mantém o stdout reservado a JSON-RPC. `browser_statu
 
 ### Favoritos do Chrome e Edge
 
-O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela API oficial de extensões. A extensão mínima `Achilles Browser Bridge` solicita somente a permissão de favoritos. Veja [instalação, comandos e limites](.docs/browser-bookmarks.md). Exemplo: `achilles bookmarks search "Achilles"`.
+O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela API oficial de extensões. A extensão mínima `Achilles Browser Bridge` solicita somente a permissão de favoritos. `achilles --extension` gera um ZIP e uma pasta pronta para instalar na Área de Trabalho, com instruções por notificação e no terminal. A instalação no navegador é manual. Veja [instalação, comandos e limites](.docs/browser-bookmarks.md). Exemplo: `achilles bookmarks search "Achilles"`.
 
 ---
 
@@ -189,6 +189,7 @@ O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela
 | `achilles open <url>` | Abre ou navega uma aba do Chrome para a URL informada |
 | `achilles status` | Exibe métricas de sessão e porta CDP |
 | `achilles bookmarks list` | Lista pastas de favoritos do Chrome/Edge conectado |
+| `achilles --extension` | Prepara ZIP e pasta da extensão na Área de Trabalho e mostra as instruções |
 | `achilles read` | Extrai o conteúdo principal em Markdown |
 | `achilles snapshot --limit 50` | Lista elementos interativos `[@ref]` visíveis no viewport |
 | `achilles act click <ref>` | Executa clique em um elemento pelo seu ID de referência ou índice |

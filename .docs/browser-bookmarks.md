@@ -2,12 +2,20 @@
 
 O Achilles usa Playwright para manter a sessão CDP e uma extensão Manifest V3 mínima para acessar `chrome.bookmarks`. A extensão pede apenas a permissão `bookmarks`. O CDP não oferece uma API própria para criar, editar ou remover favoritos. Nenhum arquivo `Bookmarks` do perfil é editado diretamente.
 
-## Instalação
+## Preparar e instalar
+
+```powershell
+achilles --extension
+```
+
+O comando cria `Achilles Browser Bridge.zip` e a pasta descompactada `Achilles Browser Bridge` na Área de Trabalho. Mostra um toast no Windows quando as notificações estiverem disponíveis e imprime as instruções no terminal. O ZIP serve para transportar ou guardar os arquivos. O Chrome e o Edge instalam **a pasta**, não o ZIP.
 
 1. Abra `chrome://extensions` ou `edge://extensions` **no mesmo perfil que o Achilles controla**.
-2. Ative o modo de desenvolvedor e escolha **Carregar sem compactação / Load unpacked**.
-3. Selecione a pasta `achilles/browser_extension` deste repositório. O ID deve ser `iaheffblcnihpbdecmnkioimgdjjffgo`.
-4. Inicie o navegador com CDP na porta desejada ou deixe o Achilles iniciá-lo. O perfil criado automaticamente pelo Achilles é separado do seu perfil pessoal. O Achilles tenta carregar a extensão ao iniciar Edge (desativando outras extensões desse perfil) ou Chrome. Esses sinalizadores dependem da versão do navegador: no Chrome instalado testado localmente foram bloqueados. A instalação manual nos passos acima funciona para perfis já existentes e é o caminho confiável nos navegadores de marca.
+2. Ative **Modo do desenvolvedor** e escolha **Carregar sem compactação / Load unpacked**.
+3. Selecione a pasta `Achilles Browser Bridge` criada na Área de Trabalho.
+4. Confirme o ID `iaheffblcnihpbdecmnkioimgdjjffgo` e teste com `achilles bookmarks list`.
+
+Se você copiar o ZIP para outra máquina, extraia-o primeiro para uma pasta permanente e selecione essa pasta. Mantenha a pasta no local escolhido: o navegador carrega a extensão diretamente dela. O Achilles abre normalmente mesmo sem a extensão; apenas as operações de favoritos precisam dela. O perfil criado automaticamente pelo Achilles é separado do perfil pessoal. Se a porta CDP já estiver ocupada, Achilles se conecta ao navegador que está nessa porta, então instale a extensão nele.
 
 O Chrome é o padrão. Para iniciar o Edge automaticamente no PowerShell:
 

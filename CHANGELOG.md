@@ -6,6 +6,7 @@ Este arquivo registra mudanças relevantes ao usuário. O bloco abaixo reúne al
 
 ### Adicionado
 
+- `achilles --extension` prepara a extensão de favoritos para instalação manual e notifica o usuário no Windows.
 - Ferramentas CLI, MCP e REST para listar, buscar, criar, editar e remover favoritos de Chrome/Edge por extensão com permissão `bookmarks`.
 - Relatório HTML com timeline de operações, histórico HTTP e desafios observados.
 - Benchmark local reproduzível de conexão CDP, snapshot, leitura e ação.
