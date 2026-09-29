@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 
-READER_EXTRACT = r"""() => {
+READER_EXTRACT = r"""(maxLength) => {
     const candidates = [
         'article', '[role="main"]', 'main', '#main', '#content',
         '.post-content', '.article-content', '.entry-content', '.content', 'body'
@@ -135,6 +135,7 @@ READER_EXTRACT = r"""() => {
 
     let markdown = toMarkdown(clone);
     markdown = markdown.replace(/\n{3,}/g, '\n\n').trim();
+    if (markdown.length > maxLength) markdown = markdown.slice(0, maxLength) + '\n\n... [CONTEÚDO TRUNCADO PELO LIMITE]';
 
     const title = document.title || (document.querySelector('h1') ? document.querySelector('h1').innerText.trim() : '');
     const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
@@ -223,6 +224,12 @@ EXTRACT = r"""({key, attribute, limit, in_viewport_only, selector}) => {
     return {epoch:state.epoch, revision:state.revision, elements:result, truncated};
 }"""
 
+FAST_EXTRACT = EXTRACT.replace(
+    "return {epoch:state.epoch, revision:state.revision, elements:result, truncated};",
+    "return {epoch:state.epoch, revision:state.revision, elements:result, truncated, "
+    "challenge:(" + EVALUATE_CHALLENGE_JS + ")()};",
+)
+
 
 class ObservationEngine:
     def __init__(self, session: BrowserSessionManager, max_snapshots: int = 32) -> None:
@@ -297,6 +304,7 @@ class ObservationEngine:
         format: str = "compact",
         in_viewport_only: bool = True,
         selector: Optional[str] = None,
+        fast: bool = False,
     ) -> Dict[str, Any]:
         key, page = await self.session.page(page_id)
         async with self.session.registry.locks[key]:
@@ -304,10 +312,11 @@ class ObservationEngine:
                 key,
                 page,
                 limit,
-                include_ax=True,
+                include_ax=not fast,
                 format=format,
                 in_viewport_only=in_viewport_only,
                 selector=selector,
+                fast=fast,
             )
 
     async def capture(
@@ -319,6 +328,7 @@ class ObservationEngine:
         format: str = "compact",
         in_viewport_only: bool = True,
         selector: Optional[str] = None,
+        fast: bool = False,
     ) -> Dict[str, Any]:
         if page.is_closed():
             raise ServiceError("PAGE_CLOSED", "A aba foi fechada.")
@@ -326,11 +336,12 @@ class ObservationEngine:
         elements: List[Dict[str, Any]] = []
         frame_states: Dict[str, Any] = {}
         warnings = []
+        challenge_check = None
         for frame in list(page.frames)[:64]:
             frame_id = self.session.registry.frame_id(frame)
             try:
                 data = await frame.evaluate(
-                    EXTRACT,
+                    FAST_EXTRACT if fast and frame == page.main_frame else EXTRACT,
                     {
                         "key": self.state_key,
                         "attribute": self.attribute,
@@ -343,6 +354,8 @@ class ObservationEngine:
                 warnings.append({"frame_id": frame_id, "code": "FRAME_UNAVAILABLE"})
                 continue
             frame_states[frame_id] = {"epoch": data["epoch"], "revision": data["revision"]}
+            if frame == page.main_frame:
+                challenge_check = data.get("challenge")
             if data["truncated"]:
                 warnings.append({"frame_id": frame_id, "code": "SNAPSHOT_TRUNCATED"})
             for item in data["elements"]:
@@ -360,7 +373,8 @@ class ObservationEngine:
                 break
         accessibility = await self._accessibility(page, elements) if include_ax else "fast_dom"
         try:
-            challenge_check = await page.evaluate(EVALUATE_CHALLENGE_JS)
+            if challenge_check is None:
+                challenge_check = await page.evaluate(EVALUATE_CHALLENGE_JS)
             if challenge_check.get("detected"):
                 warnings.append({
                     "code": "HUMAN_CHALLENGE_DETECTED",
@@ -445,7 +459,7 @@ class ObservationEngine:
             raise ServiceError("PAGE_CLOSED", "A aba foi fechada.")
         async with self.session.registry.locks[key]:
             try:
-                extracted = await page.evaluate(READER_EXTRACT)
+                extracted = await page.evaluate(READER_EXTRACT, max_length)
             except Exception as exc:
                 raise ServiceError(
                     "READ_ERROR", f"Falha ao extrair conteúdo legível: {type(exc).__name__}"

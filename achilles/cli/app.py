@@ -149,6 +149,26 @@ def build_parser() -> argparse.ArgumentParser:
     exp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     exp_p.add_argument("--lang", "-l", choices=["pt", "en"], default=None)
 
+    bookmarks_p = commands.add_parser("bookmarks", help="Gerencia favoritos do Chrome/Edge conectado")
+    bookmarks_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    bookmark_actions = bookmarks_p.add_subparsers(dest="bookmark_operation", required=True)
+    list_p = bookmark_actions.add_parser("list", help="Lista pastas ou filhos de uma pasta")
+    list_p.add_argument("--parent-id", default=None)
+    list_p.add_argument("--limit", type=int, default=100)
+    search_p = bookmark_actions.add_parser("search", help="Busca por título ou URL")
+    search_p.add_argument("query")
+    search_p.add_argument("--limit", type=int, default=100)
+    create_p = bookmark_actions.add_parser("create", help="Cria um favorito HTTP(S)")
+    create_p.add_argument("title")
+    create_p.add_argument("url")
+    create_p.add_argument("--parent-id", default=None)
+    update_p = bookmark_actions.add_parser("update", help="Edita título ou URL")
+    update_p.add_argument("id")
+    update_p.add_argument("--title", default=None)
+    update_p.add_argument("--url", default=None)
+    remove_p = bookmark_actions.add_parser("remove", help="Remove favorito ou pasta vazia")
+    remove_p.add_argument("id")
+
     return parser
 
 
@@ -252,6 +272,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             asyncio.run(run_audit(args.cdp_port, I18n(getattr(args, "lang", None)), args.page_id))
         elif args.command == "start":
             import uvicorn
+
             from achilles.api.server import create_app
 
             uvicorn.run(
@@ -267,7 +288,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             asyncio.run(run_mcp_stdio(args.cdp_port))
         elif args.command == "doctor":
             from achilles.cli.doctor import run_doctor
-            asyncio.run(run_doctor(args.cdp_port, args.deep))
+            if not asyncio.run(run_doctor(args.cdp_port, args.deep)):
+                raise SystemExit(1)
         elif args.command in ("wait-challenge", "challenge", "wait-human"):
             from achilles.cli.commands import run_wait_challenge
             from achilles.cli.i18n import I18n
@@ -303,6 +325,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     args.output,
                 )
             )
+        elif args.command == "bookmarks":
+            from achilles.cli.bookmarks import run_bookmarks
+
+            fields = {
+                "list": ("parent_id", "limit"),
+                "search": ("query", "limit"),
+                "create": ("title", "url", "parent_id"),
+                "update": ("id", "title", "url"),
+                "remove": ("id",),
+            }[args.bookmark_operation]
+            arguments = {field: getattr(args, field) for field in fields}
+            asyncio.run(run_bookmarks(args.cdp_port, args.bookmark_operation, arguments))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

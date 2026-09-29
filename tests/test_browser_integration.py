@@ -4,9 +4,11 @@ import asyncio
 import json
 import os
 import socket
+import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from achilles.services.application import ApplicationServices
 from achilles.services.errors import ServiceError
@@ -53,6 +55,89 @@ class Handler(BaseHTTPRequestHandler):
     "Set ACHILLES_BROWSER_TESTS=1 for isolated Chromium tests",
 )
 class BrowserTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bookmarks_bridge_on_edge_profile(self) -> None:
+        from playwright.async_api import async_playwright
+
+        if os.environ.get("ACHILLES_EDGE_TESTS") != "1":
+            self.skipTest("Set ACHILLES_EDGE_TESTS=1 to test installed Edge")
+        edge = Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+        if os.name != "nt" or not edge.is_file():
+            self.skipTest("Microsoft Edge not installed")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            cdp_port = sock.getsockname()[1]
+        extension = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
+        with tempfile.TemporaryDirectory() as profile:
+            owner = await async_playwright().start()
+            context = await owner.chromium.launch_persistent_context(
+                profile,
+                executable_path=str(edge),
+                headless=True,
+                args=[
+                    f"--remote-debugging-port={cdp_port}",
+                    f"--disable-extensions-except={extension}",
+                    f"--load-extension={extension}",
+                ],
+            )
+            app = ApplicationServices(cdp_port)
+            try:
+                created = await app.call(
+                    "browser_bookmarks_create",
+                    {"title": "Achilles Edge fixture", "url": "https://example.test/edge"},
+                )
+                bookmark_id = created["bookmark"]["id"]
+                found = await app.call("browser_bookmarks_search", {"query": "Achilles Edge fixture"})
+                self.assertIn(bookmark_id, [item["id"] for item in found["bookmarks"]])
+                await app.call("browser_bookmarks_remove", {"id": bookmark_id})
+            finally:
+                await app.close()
+                await context.close()
+                await owner.stop()
+
+    async def test_bookmarks_bridge_on_disposable_profile(self) -> None:
+        from playwright.async_api import async_playwright
+
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            cdp_port = sock.getsockname()[1]
+        extension = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
+        with tempfile.TemporaryDirectory() as profile:
+            owner = await async_playwright().start()
+            context = await owner.chromium.launch_persistent_context(
+                profile,
+                channel="chromium",
+                headless=True,
+                args=[
+                    f"--remote-debugging-port={cdp_port}",
+                    f"--disable-extensions-except={extension}",
+                    f"--load-extension={extension}",
+                ],
+            )
+            app = ApplicationServices(cdp_port)
+            try:
+                roots = await app.call("browser_bookmarks_list", {})
+                self.assertTrue(roots["bookmarks"])
+                created = await app.call(
+                    "browser_bookmarks_create",
+                    {"title": "Achilles fixture", "url": "https://example.test/path?token=secret"},
+                )
+                bookmark_id = created["bookmark"]["id"]
+                self.assertNotIn("secret", created["bookmark"]["url"])
+                found = await app.call("browser_bookmarks_search", {"query": "Achilles fixture"})
+                self.assertIn(bookmark_id, [item["id"] for item in found["bookmarks"]])
+                edited = await app.call(
+                    "browser_bookmarks_update", {"id": bookmark_id, "title": "Achilles edited"}
+                )
+                self.assertEqual(edited["bookmark"]["title"], "Achilles edited")
+                removed = await app.call("browser_bookmarks_remove", {"id": bookmark_id})
+                self.assertTrue(removed["removed"])
+                gone = await app.call("browser_bookmarks_search", {"query": "Achilles edited"})
+                self.assertEqual(gone["total"], 0)
+            finally:
+                await app.close()
+                await context.close()
+                await owner.stop()
+
     async def test_snapshot_actions_traffic_reconnect_attach(self) -> None:
         from playwright.async_api import async_playwright
 
@@ -73,6 +158,10 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*(app.session.connect() for _ in range(5)))
             self.assertEqual(app.session.generation, 1)
             page_id, page = await app.session.page()
+            with self.assertRaises(ServiceError) as missing_bridge:
+                await app.call("browser_bookmarks_list", {})
+            self.assertEqual(missing_bridge.exception.code, "BOOKMARK_BRIDGE_UNAVAILABLE")
+            self.assertEqual(app.session.registry.active_page_id, page_id)
             url = f"http://127.0.0.1:{server.server_port}"
             await page.goto(url)
             await (
@@ -85,6 +174,11 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             names = {e["name"] for e in snapshot["elements"]}
             self.assertIn("chrome_ax", snapshot["accessibility"])
             self.assertTrue({"Name", "Save", "Shadow", "Frame", "Nested"}.issubset(names), names)
+            fast_snapshot = await app.call("browser_snapshot", {"page_id": page_id})
+            self.assertEqual(fast_snapshot["accessibility"], "fast_dom")
+            self.assertTrue({"Name", "Save", "Shadow", "Frame", "Nested"}.issubset(
+                {e["name"] for e in fast_snapshot["elements"]}
+            ))
 
             async def act(name: str, action: str, value: str = "") -> dict:
                 snap = await app.observations.snapshot(page_id)

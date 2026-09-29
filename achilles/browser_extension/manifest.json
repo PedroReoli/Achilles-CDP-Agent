@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Achilles Browser Bridge",
+  "version": "1.0.0",
+  "description": "Allows Achilles to manage bookmarks in this browser profile.",
+  "permissions": ["bookmarks"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr1XhNW0MYVzl0AQl/Bk1VSdpCu7CKixJ/w5Eo1ZjlpjkIoxbDb+fszvwIRiJMZTabOJ6vYvHKgyW/wAWivGFArAsDsJC4/hla3FWGNLA10OPYAPrPnJdDIBjsOuo1FzgUWxVg9dWw1m4njk5k/C3M0wlb01py29J6FjbzT4B5poD5QQstn0qgHBLwTZR8vIJlF+ur3EXXMlP6UqeUYHf5Egxt4+IrS8kM5fCM9cuC9CBSwv2o1YLX2+efd6BRQNpngBc7JtPjwNIeV9dy7X1OUFeLF2vKSVpgaaeQkxbYdcRHmiI0WiCJH8kNShOv37S2ivymANSG8m985dlPN2BqQIDAQAB"
+}

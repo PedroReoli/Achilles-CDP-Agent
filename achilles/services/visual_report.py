@@ -1,7 +1,6 @@
 """Gerador de Dashboard Visual HTML Standalone para relatórios e auditoria de sessão."""
 
 import html
-import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -14,6 +13,9 @@ def generate_html_report(
     actions_log: Optional[List[Dict[str, Any]]] = None,
     stealth_status: Optional[Dict[str, Any]] = None,
 ) -> str:
+    timeline: List[Dict[str, Any]] = []
+    request_history: List[Dict[str, Any]] = []
+    challenge_history: List[Dict[str, Any]] = []
     # Suporte a passagem de dicionário consolidado como único argumento
     if (
         isinstance(token_metrics, dict)
@@ -24,8 +26,10 @@ def generate_html_report(
         token_metrics = report.get("token_metrics", {})
         routes_report = report.get("routes_report", {})
         security_audit = report.get("security_audit")
-        actions_log = report.get("actions_log")
         stealth_status = report.get("stealth")
+        timeline = report.get("timeline", [])
+        request_history = report.get("request_history", [])
+        challenge_history = report.get("challenge_history", [])
     else:
         token_metrics = token_metrics or {}
         routes_report = routes_report or {}
@@ -43,7 +47,6 @@ def generate_html_report(
     total_reqs = routes_report.get("total_requests", 0)
     unique_domains = routes_report.get("unique_domains_count", 0)
     api_endpoints = routes_report.get("api_endpoints", [])
-    status_dist = routes_report.get("status_distribution", {})
 
     # Security
     audit = security_audit or {}
@@ -87,7 +90,53 @@ def generate_html_report(
         </div>
         """
     if not findings_html:
-        findings_html = "<div class='empty-card'>Nenhuma vulnerabilidade crítica ou finding registrado na aba atual.</div>"
+        findings_html = (
+            "<div class='empty-card'>Nenhum achado registrado.</div>"
+            if security_audit is not None
+            else "<div class='empty-card'>Auditoria de segurança não executada nesta sessão.</div>"
+        )
+
+    stealth_labels = {
+        "automation_controlled_disabled": "Chromium AutomationControlled desativado",
+        "navigator_webdriver_masked": "Navigator webdriver mascarado",
+        "canvas_2d_noise_active": "Ruído de Canvas configurado",
+        "webgl_vendor_spoofing_active": "WebGL configurado",
+        "audio_buffer_jitter_active": "Jitter de áudio configurado",
+        "persistent_profile_active": "Perfil persistente configurado",
+        "secret_redaction_active": "Redação de segredos configurada",
+    }
+    stealth_items = "".join(
+        f'<div class="stealth-item"><span class="check-icon">•</span> {html.escape(label)}</div>'
+        for key, label in stealth_labels.items()
+        if (stealth_status or {}).get(key)
+    ) or '<div class="stealth-item">Nenhum recurso informado.</div>'
+
+    def cell(value: Any) -> str:
+        return html.escape(str(value if value is not None else "-"), quote=True)
+
+    def date(value: Any) -> str:
+        try:
+            return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(float(value)))
+        except (TypeError, ValueError, OverflowError):
+            return "-"
+
+    timeline_rows = "".join(
+        f"<tr><td>{cell(date(event.get('at')))}</td><td>{cell(event.get('operation'))}</td>"
+        f"<td>{cell(event.get('url', '-'))}</td><td>{cell(event.get('status', '-'))}</td>"
+        f"<td>{cell(event.get('duration_ms'))} ms</td></tr>"
+        for event in timeline[-100:]
+    ) or "<tr><td colspan='5' class='empty'>Nenhuma operação registrada nesta sessão.</td></tr>"
+    request_rows = "".join(
+        f"<tr><td>{cell(date(req.get('at')))}</td><td>{cell(req.get('method'))}</td>"
+        f"<td><code class='path'>{cell(req.get('url'))}</code></td><td>{cell(req.get('status'))}</td></tr>"
+        for req in request_history[-100:]
+    ) or "<tr><td colspan='4' class='empty'>Nenhuma requisição registrada nesta sessão.</td></tr>"
+    challenge_rows = "".join(
+        f"<tr><td>{cell(date(event.get('at')))}</td><td>{cell(event.get('type'))}</td>"
+        f"<td>{cell(event.get('status'))}</td></tr>"
+        for event in challenge_history[-50:]
+    ) or "<tr><td colspan='3' class='empty'>Nenhum desafio observado nesta sessão.</td></tr>"
+    raw_tokens = raw_tokens_avoided + tokens_consumed
 
     html_content = f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -285,24 +334,34 @@ def generate_html_report(
                 <div class="card-sub">{unique_domains} domínios únicos • {len(api_endpoints)} APIs</div>
             </div>
             <div class="card">
-                <div class="card-label">Score de Segurança OWASP</div>
-                <div class="card-value green">{score}</div>
-                <div class="card-sub">{len(findings)} vulnerabilidades / achados</div>
+                <div class="card-label">Auditoria de Segurança OWASP</div>
+                <div class="card-value">{cell(score)}</div>
+                <div class="card-sub">{len(findings)} achados registrados</div>
             </div>
         </div>
 
         <!-- Stealth Posture Banner -->
         <div class="stealth-banner">
-            <div class="section-title">🛡️ Postura Furtiva Anti-Bot & Anti-Detection Ativa</div>
+            <div class="section-title">🛡️ Recursos Declarados pela Sessão</div>
+            <p class="card-sub">Configuração informada pelo serviço; não constitui teste de eficácia.</p>
             <div class="stealth-grid">
-                <div class="stealth-item"><span class="check-icon">✔</span> Chromium AutomationControlled Desativado</div>
-                <div class="stealth-item"><span class="check-icon">✔</span> Navigator Webdriver Mascarado (undefined)</div>
-                <div class="stealth-item"><span class="check-icon">✔</span> WebGL & Canvas Fingerprint Randomizado</div>
-                <div class="stealth-item"><span class="check-icon">✔</span> Web Audio API Acoustic Jitter Ativo</div>
-                <div class="stealth-item"><span class="check-icon">✔</span> Perfil Persistente de Usuário Conectado</div>
-                <div class="stealth-item"><span class="check-icon">✔</span> Redação Zero-Secret Ativa (Privacidade Absoluta)</div>
+                {stealth_items}
             </div>
         </div>
+
+        <!-- API Routes Table -->
+        <div class="section-title">📊 Comparativo de Tokens (estimativa: 4 caracteres por token)</div>
+        <div class="table-container"><table><thead><tr><th>Conteúdo bruto estimado</th><th>Conteúdo enviado estimado</th><th>Economia estimada</th></tr></thead>
+        <tbody><tr><td>{raw_tokens:,}</td><td>{tokens_consumed:,}</td><td>{raw_tokens_avoided:,} ({cell(saved_pct)})</td></tr></tbody></table></div>
+
+        <div class="section-title">🕒 Timeline da Sessão</div>
+        <div class="table-container"><table><thead><tr><th>Horário</th><th>Operação</th><th>URL redigida</th><th>Status</th><th>Duração</th></tr></thead><tbody>{timeline_rows}</tbody></table></div>
+
+        <div class="section-title">🧩 Desafios e Resolução Humana</div>
+        <div class="table-container"><table><thead><tr><th>Horário</th><th>Tipo</th><th>Status</th></tr></thead><tbody>{challenge_rows}</tbody></table></div>
+
+        <div class="section-title">📡 Histórico de Requisições (até 100)</div>
+        <div class="table-container"><table><thead><tr><th>Horário</th><th>Método</th><th>URL redigida</th><th>Status</th></tr></thead><tbody>{request_rows}</tbody></table></div>
 
         <!-- API Routes Table -->
         <div class="section-title">🌐 Rotas & APIs de Rede Inspecionadas ({len(api_endpoints)})</div>
@@ -329,7 +388,7 @@ def generate_html_report(
         </div>
 
         <footer>
-            Achilles CDP Agent v2.1 • Motor Autônomo de Navegação & Segurança • Gerado Localmente Sem Vazamento de Dados
+            Achilles CDP Agent v2.1 • Relatório local da sessão com URLs redigidas
         </footer>
     </div>
 </body>

@@ -203,6 +203,10 @@ class BrowserSessionManager:
         self.console_events: Deque[Dict[str, Any]] = deque(maxlen=100)
         self.generation = 0
 
+    @property
+    def browser(self) -> Optional["Browser"]:
+        return self._browser
+
     def _connection_lock(self) -> asyncio.Lock:
         if self._lock is None:
             self._lock = asyncio.Lock()
@@ -310,11 +314,8 @@ class BrowserSessionManager:
             for attempt in range(self.attempts):
                 try:
                     if attempt == 0:
-                        try:
-                            from achilles.cli.commands import ensure_chrome_running
-                            ensure_chrome_running(self.cdp_port)
-                        except Exception:
-                            pass
+                        from .chrome_launcher import ensure_chrome_running
+                        await asyncio.to_thread(ensure_chrome_running, self.cdp_port)
                     self._playwright = await async_playwright().start()
                     connect = self._playwright.chromium.connect_over_cdp
                     options: Dict[str, Any] = {"timeout": self.connect_timeout_ms}
@@ -324,7 +325,7 @@ class BrowserSessionManager:
                     self._listen(
                         self._browser,
                         "disconnected",
-                        lambda: LOG.info("Chrome desconectado; reconexão na próxima operação"),
+                        lambda: LOG.info("Navegador CDP desconectado; reconexão na próxima operação"),
                     )
                     self.generation += 1
                     for context in self._browser.contexts:
@@ -338,7 +339,7 @@ class BrowserSessionManager:
                     await self._cleanup()
                     if attempt + 1 == self.attempts:
                         raise ServiceError(
-                            "CDP_UNAVAILABLE", "Chrome CDP indisponível na porta configurada.", True
+                            "CDP_UNAVAILABLE", "Navegador CDP indisponível na porta configurada.", True
                         ) from exc
                     await asyncio.sleep(min(0.25 * 2**attempt, 2) + random.uniform(0, 0.1))
 
@@ -384,7 +385,7 @@ class BrowserSessionManager:
     async def new_page(self, url: Optional[str] = None) -> Dict[str, Any]:
         await self.connect()
         if self._browser is None:
-            raise ServiceError("CDP_UNAVAILABLE", "Chrome CDP indisponível.")
+            raise ServiceError("CDP_UNAVAILABLE", "Navegador CDP indisponível.")
         context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
         page = await context.new_page()
         key = self._track_page(page)
@@ -441,7 +442,8 @@ class BrowserSessionManager:
 
         key, page = await self.page(page_id)
         async with self.registry.locks[key]:
-            from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
+            from playwright.async_api import Error as PlaywrightError
+            from playwright.async_api import TimeoutError as PlaywrightTimeoutError
             try:
                 valid_wait = wait_until if wait_until in ("load", "domcontentloaded", "networkidle", "commit") else "domcontentloaded"
                 response = await page.goto(url, wait_until=valid_wait, timeout=timeout_ms)  # type: ignore[arg-type]

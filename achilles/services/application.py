@@ -2,15 +2,19 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, Literal, Optional, Type
+import time
+from collections import deque
+from typing import Any, Dict, List, Literal, Optional, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .action_resolver import ActionResolver
+from .bookmarks import BookmarkService
 from .challenge_engine import ChallengeEngine
 from .domain_memory import DomainMemoryEngine
 from .errors import ServiceError
 from .observation_engine import ObservationEngine
+from .redaction import redact_url
 from .security_engine import SecurityAuditEngine
 from .session_manager import BrowserSessionManager
 from .traffic_journal import TrafficJournal
@@ -55,6 +59,7 @@ class SnapshotArguments(PageArguments):
     format: Literal["compact", "json", "markdown"] = "compact"
     in_viewport_only: bool = True
     selector: Optional[str] = Field(None, max_length=256)
+    fast: bool = True
 
 
 class ReadArguments(PageArguments):
@@ -99,12 +104,44 @@ class DomainMemoryArguments(Arguments):
     domain: Optional[str] = Field(None, max_length=256)
     authenticated: Optional[bool] = None
     shortcuts: Optional[Dict[str, str]] = None
-    api_endpoints: Optional[list] = None
+    api_endpoints: Optional[List[str]] = None
     note: Optional[str] = Field(None, max_length=1000)
 
 
 class ExportHtmlReportArguments(PageArguments):
     output_path: Optional[str] = Field(None, max_length=1024)
+
+
+class BookmarkListArguments(Arguments):
+    parent_id: Optional[str] = Field(None, min_length=1, max_length=128)
+    limit: int = Field(100, ge=1, le=500)
+
+
+class BookmarkSearchArguments(Arguments):
+    query: str = Field(min_length=1, max_length=512)
+    limit: int = Field(100, ge=1, le=500)
+
+
+class BookmarkCreateArguments(Arguments):
+    title: str = Field(min_length=1, max_length=512)
+    url: str = Field(min_length=1, max_length=4096)
+    parent_id: Optional[str] = Field(None, min_length=1, max_length=128)
+
+
+class BookmarkUpdateArguments(Arguments):
+    id: str = Field(min_length=1, max_length=128)
+    title: Optional[str] = Field(None, min_length=1, max_length=512)
+    url: Optional[str] = Field(None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def change_required(self) -> "BookmarkUpdateArguments":
+        if self.title is None and self.url is None:
+            raise ValueError("Informe title ou url")
+        return self
+
+
+class BookmarkRemoveArguments(Arguments):
+    id: str = Field(min_length=1, max_length=128)
 
 
 CONTRACTS: Dict[str, Type[Arguments]] = {
@@ -122,6 +159,11 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "browser_wait_for_challenge": WaitForChallengeArguments,
     "browser_domain_memory": DomainMemoryArguments,
     "browser_export_html_report": ExportHtmlReportArguments,
+    "browser_bookmarks_list": BookmarkListArguments,
+    "browser_bookmarks_search": BookmarkSearchArguments,
+    "browser_bookmarks_create": BookmarkCreateArguments,
+    "browser_bookmarks_update": BookmarkUpdateArguments,
+    "browser_bookmarks_remove": BookmarkRemoveArguments,
     "network_query": TrafficArguments,
     "network_curl": CurlArguments,
     "network_postman": Arguments,
@@ -129,9 +171,9 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
 }
 DESCRIPTIONS = {
     "browser_status": "Estado do transporte e da captura, sem conectar automaticamente.",
-    "browser_list_pages": "Lista abas e frames disponíveis no Chrome conectado.",
+    "browser_list_pages": "Lista abas e frames disponíveis no navegador CDP conectado.",
     "browser_select_page": "Seleciona explicitamente uma aba e a traz para frente.",
-    "browser_new_tab": "Abre uma nova aba no Chrome, opcionalmente navegando para uma URL.",
+    "browser_new_tab": "Abre uma nova aba no navegador, opcionalmente navegando para uma URL.",
     "browser_close_tab": "Fecha a aba especificada ou a aba ativa atual.",
     "browser_navigate": "Navega a aba ativa ou especificada para uma URL com estratégia de espera.",
     "browser_scroll": "Rola a página ou container (up, down, top, bottom) para lazy-load ou infinite scroll.",
@@ -142,6 +184,11 @@ DESCRIPTIONS = {
     "browser_wait_for_challenge": "Detecta desafios anti-bot (Turnstile, reCAPTCHA, hCaptcha, WAF) e 2FA/OTP, aguardando resolução humana cooperativa.",
     "browser_domain_memory": "Acessa e gerencia memória semântica persistente de autenticação, atalhos de rotas e APIs por domínio.",
     "browser_export_html_report": "Gera e exporta dashboard HTML standalone dark-mode com KPIs, métricas de tokens e rotas descobertas.",
+    "browser_bookmarks_list": "Lista pastas ou favoritos do perfil Chrome/Edge conectado.",
+    "browser_bookmarks_search": "Busca favoritos por título ou URL no perfil Chrome/Edge conectado.",
+    "browser_bookmarks_create": "Cria favorito HTTP(S) no navegador via extensão Achilles Browser Bridge.",
+    "browser_bookmarks_update": "Edita título ou URL de favorito no navegador via extensão.",
+    "browser_bookmarks_remove": "Remove um favorito ou uma pasta vazia pelo ID no navegador.",
     "network_query": "Últimos exchanges HTTP redigidos com status e response headers.",
     "network_curl": "Exporta um exchange redigido para POSIX ou PowerShell.",
     "network_postman": "Coleção Postman 2.1 com credenciais redigidas.",
@@ -155,10 +202,13 @@ class ApplicationServices:
         self.session = BrowserSessionManager(cdp_port, self.journal)
         self.observations = ObservationEngine(self.session)
         self.actions = ActionResolver(self.session, self.observations)
+        self.bookmarks = BookmarkService(self.session)
         self.security = SecurityAuditEngine(self.session, self.journal)
         self.challenges = ChallengeEngine(self.session)
         self.domain_memory = DomainMemoryEngine()
         self.closed = False
+        self.events = deque(maxlen=200)
+        self.challenge_events = deque(maxlen=50)
 
     @staticmethod
     def tools() -> Dict[str, Any]:
@@ -170,9 +220,9 @@ class ApplicationServices:
                     "inputSchema": contract.model_json_schema(),
                     "outputSchema": {"type": "object", "additionalProperties": True},
                     "annotations": {
-                        "readOnlyHint": name not in ("browser_action", "browser_select_page", "browser_new_tab", "browser_close_tab", "browser_domain_memory"),
-                        "destructiveHint": name in ("browser_action", "browser_close_tab"),
-                        "idempotentHint": name not in ("browser_action", "browser_new_tab", "browser_close_tab"),
+                        "readOnlyHint": name not in ("browser_action", "browser_select_page", "browser_new_tab", "browser_close_tab", "browser_domain_memory", "browser_bookmarks_create", "browser_bookmarks_update", "browser_bookmarks_remove"),
+                        "destructiveHint": name in ("browser_action", "browser_close_tab", "browser_bookmarks_remove"),
+                        "idempotentHint": name not in ("browser_action", "browser_new_tab", "browser_close_tab", "browser_bookmarks_create", "browser_bookmarks_remove"),
                         "openWorldHint": True,
                     },
                 }
@@ -181,19 +231,42 @@ class ApplicationServices:
         }
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        started = time.perf_counter()
+        outcome = "ok"
         try:
-            return await asyncio.wait_for(self._invoke(name, arguments), timeout=90)
+            result = await asyncio.wait_for(self._invoke(name, arguments), timeout=90)
         except asyncio.TimeoutError as exc:
+            outcome = "timeout"
             raise ServiceError(
                 "OPERATION_TIMEOUT", "Operação excedeu o prazo; observe o estado antes de repetir."
             ) from exc
         except ServiceError:
+            outcome = "error"
             raise
         except Exception as exc:
+            outcome = "error"
             logging.getLogger(__name__).error("Falha em %s: %s", name, type(exc).__name__)
             raise ServiceError(
                 "INTERNAL_ERROR", "Falha interna; nenhum detalhe sensível foi retornado."
             ) from exc
+        finally:
+            if name not in ("browser_report", "browser_export_html_report"):
+                self.events.append({
+                    "at": time.time(),
+                    "operation": name,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "page_id": arguments.get("page_id"),
+                    "status": outcome,
+                })
+        if name == "browser_navigate" and self.events:
+            self.events[-1]["url"] = redact_url(result.get("url", ""))
+        if name == "browser_snapshot":
+            for warning in result.get("warnings", []):
+                if warning.get("code") == "HUMAN_CHALLENGE_DETECTED":
+                    self.challenge_events.append({"at": time.time(), "type": warning.get("type"), "status": "detected"})
+        elif name == "browser_wait_for_challenge":
+            self.challenge_events.append({"at": time.time(), "type": "human_assisted", "status": result.get("status")})
+        return result
 
     async def _invoke(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if name not in CONTRACTS:
@@ -265,6 +338,8 @@ class ApplicationServices:
                 return {"exported": True, "filepath": filepath, "report_path": filepath}
             html = generate_html_report(report_data)
             return {"exported": True, "html": html}
+        if name.startswith("browser_bookmarks_"):
+            return await self.bookmarks.call(name.removeprefix("browser_bookmarks_"), **args)
         if name == "network_query":
             await self.session.connect()
             await self.session.drain()
@@ -290,6 +365,17 @@ class ApplicationServices:
     async def get_report(self, page_id: Optional[str] = None) -> Dict[str, Any]:
         token_metrics = self.observations.get_token_metrics()
         routes_report = self.journal.get_routes_report(page_id)
+        request_history = [
+            {
+                "at": row["started_at"],
+                "method": row["method"],
+                "url": redact_url(row["url"]),
+                "status": row["status"],
+                "resource_type": row["resource_type"],
+            }
+            for row in self.journal.records
+            if page_id is None or row.get("page_id") == page_id
+        ][-100:]
         try:
             _, page = await self.session.page(page_id)
             domain_mem = self.domain_memory.get(page.url)
@@ -298,6 +384,9 @@ class ApplicationServices:
         return {
             "token_metrics": token_metrics,
             "routes_report": routes_report,
+            "timeline": [event for event in self.events if page_id is None or event.get("page_id") in (None, page_id)],
+            "request_history": request_history,
+            "challenge_history": list(self.challenge_events),
             "domain_memory": domain_mem,
             "stealth": {
                 "automation_controlled_disabled": True,
