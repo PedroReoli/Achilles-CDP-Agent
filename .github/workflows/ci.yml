@@ -30,12 +30,65 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[test]"
-          pip install ruff
+          pip install ruff==0.16.9
 
       - name: Lint with Ruff
         run: |
-          ruff check achilles tests
+          ruff check achilles tests scripts setup.py
 
       - name: Run Unit Tests
         run: |
           python -m unittest discover tests -v
+
+  package:
+    name: Package wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and source distribution
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir dist
+          python setup.py sdist --dist-dir dist
+
+      - name: Verify browser extension is packaged
+        run: |
+          python -c "import glob, zipfile; names = set(zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()); assert {'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html'} <= names"
+          python -c "import glob, tarfile; names = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames(); assert all(any(p.endswith('/' + f) for p in names) for f in ['CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html'])"
+
+  browser:
+    name: Browser integration (Python 3.12 on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package and Chromium
+        run: |
+          python -m pip install -e ".[test]"
+          python -m playwright install chromium
+
+      - name: Install Chromium system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: python -m playwright install-deps chromium
+
+      - name: Run isolated browser integration
+        env:
+          ACHILLES_BROWSER_TESTS: "1"
+        run: python -m unittest discover -s tests -p test_browser_integration.py -v
