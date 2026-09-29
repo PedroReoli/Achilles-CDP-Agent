@@ -63,8 +63,10 @@ achilles_profile/
 
 # --- Export Reports & Temporary Test Output ---
 *.html
+!achilles/browser_extension/bridge.html
 !templates/**/*.html
 *.jsonl
+/benchmark.json
 achilles_demo_report.html
 relatorio_*.html
 report_*.html

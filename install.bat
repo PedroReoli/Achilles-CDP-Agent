@@ -5,28 +5,27 @@ echo     ACHILLES CDP AGENT — INSTALADOR WINDOWS
 echo ===================================================
 echo.
 
-echo [1/2] Instalando dependencias e pacote achilles em modo editavel...
-python -m pip install -e ".[test]"
+echo [1/2] Instalando pacote achilles em modo editavel...
+python -m pip install -e .
+if errorlevel 1 (
+    echo [ERRO] Falha na instalacao. Verifique o Python e o ambiente virtual.
+    exit /b 1
+)
 
 echo.
-echo [2/2] Validando comando global 'achilles'...
-where achilles >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-    echo [OK] Comando 'achilles' disponivel diretamente no seu PATH!
-) else (
-    echo [INFO] Pacote instalado. Caso 'achilles' nao seja reconhecido,
-    echo        certifique-se de que a pasta Scripts do seu Python esta no PATH.
-    echo        Voce tambem pode executar diretamente: python -m achilles
+echo [2/2] Validando a instalacao...
+python -m achilles doctor
+if errorlevel 1 (
+    echo [ERRO] O diagnostico falhou.
+    exit /b 1
 )
 
 echo.
 echo ===================================================
 echo   INSTALACAO CONCLUIDA COM SUCESSO!
 echo.
-echo   Agora voce pode abrir qualquer CMD ou PowerShell
-echo   e digitar simplesmente:
+echo   Use no ambiente Python atual:
 echo.
-echo       achilles
+echo       python -m achilles
 echo.
 echo ===================================================
-pause

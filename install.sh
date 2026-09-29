@@ -6,20 +6,15 @@ echo "    ACHILLES CDP AGENT — INSTALADOR UNIX (LINUX/MAC)"
 echo "==================================================="
 echo ""
 
-echo "[1/2] Instalando dependências e pacote achilles em modo editável..."
-python3 -m pip install -e ".[test]"
+echo "[1/2] Instalando pacote achilles em modo editável..."
+python3 -m pip install -e .
 
 echo ""
-echo "[2/2] Validando comando global 'achilles'..."
-if command -v achilles &> /dev/null; then
-    echo "[OK] Comando 'achilles' disponível diretamente no seu PATH!"
-else
-    echo "[INFO] Pacote instalado. Se 'achilles' não for encontrado, adicione ~/.local/bin ao seu PATH:"
-    echo "       export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo "       Ou execute: python3 -m achilles"
-fi
+echo "[2/2] Validando a instalação..."
+python3 -m achilles doctor
 
 echo ""
 echo "==================================================="
 echo "  INSTALAÇÃO CONCLUÍDA COM SUCESSO!"
+echo "  Use: python3 -m achilles"
 echo "==================================================="
