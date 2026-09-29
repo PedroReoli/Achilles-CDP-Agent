@@ -79,11 +79,6 @@ def ensure_chrome_running(port: int, timeout_s: float = 8.0) -> bool:
             subprocess, "CREATE_NEW_PROCESS_GROUP", 0
         )
     try:
-        extension = Path(__file__).resolve().parents[1] / "browser_extension"
-        browser = os.environ.get("ACHILLES_BROWSER", "chrome").lower()
-        extension_flags = [f"--load-extension={extension}"]
-        if browser == "edge":
-            extension_flags.insert(0, f"--disable-extensions-except={extension}")
         subprocess.Popen(
             [
                 executable,
@@ -91,7 +86,6 @@ def ensure_chrome_running(port: int, timeout_s: float = 8.0) -> bool:
                 f"--user-data-dir={profile_dir()}",
                 "--no-first-run",
                 "--no-default-browser-check",
-                *extension_flags,
                 "about:blank",
             ],
             stdin=subprocess.DEVNULL,

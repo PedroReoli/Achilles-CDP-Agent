@@ -100,7 +100,7 @@ class BookmarkService:
             except Exception as exc:
                 raise ServiceError(
                     "BOOKMARK_BRIDGE_UNAVAILABLE",
-                    "Instale a extensão Achilles Browser Bridge neste perfil Chrome/Edge.",
+                    "Execute achilles --extension e instale Achilles Browser Bridge neste perfil Chrome/Edge.",
                 ) from exc
             finally:
                 await page.close()
@@ -109,7 +109,7 @@ class BookmarkService:
             if response.get("error") == "BRIDGE_UNAVAILABLE":
                 raise ServiceError(
                     "BOOKMARK_BRIDGE_UNAVAILABLE",
-                    "Instale a extensão Achilles Browser Bridge neste perfil Chrome/Edge.",
+                    "Execute achilles --extension e instale Achilles Browser Bridge neste perfil Chrome/Edge.",
                 )
             if response.get("error"):
                 raise ServiceError("BOOKMARK_OPERATION_FAILED", "O navegador recusou a operação em favoritos.")

@@ -1,11 +1,15 @@
 """
 test_cli_commands.py — Testes unitários para comandos CLI e interface do Achilles.
 """
+import tempfile
 import unittest
+import zipfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from achilles.cli import commands
-from achilles.cli.app import build_parser
+from achilles.cli.app import build_parser, main
+from achilles.cli.extension import prepare_extension
 from achilles.cli.i18n import I18n
 
 
@@ -68,6 +72,19 @@ class TestCliCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args_curl.command, "curl")
         self.assertEqual(args_curl.request_id, "req_123")
         self.assertEqual(args_curl.shell, "powershell")
+
+    def test_extension_command_prepares_browser_files(self):
+        self.assertTrue(build_parser().parse_args(["--extension"]).extension)
+        with tempfile.TemporaryDirectory() as root:
+            folder, archive = prepare_extension(Path(root))
+            self.assertEqual(sorted(item.name for item in folder.iterdir()),
+                             ["bridge.html", "manifest.json"])
+            with zipfile.ZipFile(archive) as bundle:
+                self.assertEqual(sorted(bundle.namelist()), ["bridge.html", "manifest.json"])
+                self.assertEqual(bundle.read("manifest.json"), (folder / "manifest.json").read_bytes())
+            with patch("achilles.cli.extension.run_extension_package") as package:
+                main(["--extension"])
+                package.assert_called_once_with()
 
     @patch("achilles.cli.commands.ensure_chrome_running")
     async def test_run_status_mocked(self, mock_ensure):

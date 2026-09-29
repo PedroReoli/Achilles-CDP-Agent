@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import shutil
 import socket
 import tempfile
 import threading
@@ -66,8 +67,12 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cdp_port = sock.getsockname()[1]
-        extension = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
         with tempfile.TemporaryDirectory() as profile:
+            extension = Path(profile) / "extension"
+            extension.mkdir()
+            source = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
+            for name in ("manifest.json", "bridge.html"):
+                shutil.copyfile(source / name, extension / name)
             owner = await async_playwright().start()
             context = await owner.chromium.launch_persistent_context(
                 profile,
@@ -100,8 +105,12 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             cdp_port = sock.getsockname()[1]
-        extension = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
         with tempfile.TemporaryDirectory() as profile:
+            extension = Path(profile) / "extension"
+            extension.mkdir()
+            source = Path(__file__).resolve().parents[1] / "achilles" / "browser_extension"
+            for name in ("manifest.json", "bridge.html"):
+                shutil.copyfile(source / name, extension / name)
             owner = await async_playwright().start()
             context = await owner.chromium.launch_persistent_context(
                 profile,

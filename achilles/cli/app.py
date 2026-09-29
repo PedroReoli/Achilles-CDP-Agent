@@ -33,8 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version="achilles 2.1.0")
     parser.add_argument("--lang", "-l", choices=["pt", "en"], default=None, help="Idioma da interface (pt / en)")
     parser.add_argument("--ai", action="store_true", help="Exibe o protocolo autônomo para agentes de IA")
+    parser.add_argument("--extension", action="store_true", help="Prepara a extensão de favoritos na Área de Trabalho")
 
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command")
 
     # 1. Interactive REPL
     interactive_p = commands.add_parser("interactive", aliases=["i", "repl"], help="Inicia console interativo no terminal")
@@ -199,14 +200,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     parser = build_parser()
     args = parser.parse_args(raw_args)
+    if args.extension and args.command is not None:
+        parser.error("--extension deve ser usado sem outro comando")
 
     try:
-        if getattr(args, "ai", False) or args.command in ("protocol", "ai"):
+        if args.extension:
+            from achilles.cli.extension import run_extension_package
+
+            run_extension_package()
+        elif getattr(args, "ai", False) or args.command in ("protocol", "ai"):
             from achilles.cli.commands import run_protocol
             run_protocol(getattr(args, "lang", None))
-        elif args.command in ("interactive", "i", "repl"):
+        elif args.command in (None, "interactive", "i", "repl"):
             from achilles.cli.commands import run_interactive
-            asyncio.run(run_interactive(args.cdp_port, getattr(args, "lang", None)))
+            asyncio.run(run_interactive(getattr(args, "cdp_port", 9222), getattr(args, "lang", None)))
         elif args.command == "status":
             from achilles.cli.commands import run_status
             from achilles.cli.i18n import I18n
