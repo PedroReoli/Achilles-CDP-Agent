@@ -4,13 +4,11 @@ Flutua diretamente na barra de título do Google Chrome, ao lado dos botões de 
 """
 
 import ctypes
-from ctypes import wintypes
 import logging
 import queue
-import socket
 import sys
 import threading
-import time
+from ctypes import wintypes
 from typing import Optional
 
 LOG = logging.getLogger(__name__)
@@ -158,7 +156,7 @@ class NativeHudOverlay:
         # Fundo e borda arredondada estilo dark/purple
         bg_poly = round_rect(1, 1, pill_w - 1, pill_h - 1, r=13, fill="#0f172a", outline="#a855f7", width=1)
         dot = canvas.create_oval(9, 10, 17, 18, fill="#22c55e", outline="#4ade80", width=1)
-        brand = canvas.create_text(24, 14, text="ACHILLES", fill="#c084fc", font=("Segoe UI", 8, "bold"), anchor="w")
+        canvas.create_text(24, 14, text="ACHILLES", fill="#c084fc", font=("Segoe UI", 8, "bold"), anchor="w")
         label_text = canvas.create_text(80, 14, text="Achilles ativo", fill="#f1f5f9", font=("Segoe UI", 8), anchor="w")
         btn_min = canvas.create_text(pill_w - 12, 13, text="_", fill="#94a3b8", font=("Segoe UI", 8, "bold"), anchor="center")
 

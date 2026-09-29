@@ -1,7 +1,7 @@
 """
 playwright_exporter.py — Gerador de Scripts de Teste Automatizados E2E.
 """
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 
 class PlaywrightTestExporter:
@@ -20,7 +20,7 @@ class PlaywrightTestExporter:
             "        context = await browser.new_context()",
             "        page = await context.new_page()",
             "",
-            f"        # 1. Navegação Inicial",
+            "        # 1. Navegação Inicial",
             f"        await page.goto({repr(url)}, wait_until='networkidle')",
             "        assert page.url != '', 'Página carregada com sucesso'",
             "",
@@ -37,7 +37,7 @@ class PlaywrightTestExporter:
 
                 if method == "GET":
                     lines.append(f"        res = await page.request.get({repr(req_url)})")
-                    lines.append(f"        assert res.status < 400, f'GET falhou com status {{res.status}}'")
+                    lines.append("        assert res.status < 400, f'GET falhou com status {res.status}'")
                 elif method in ["POST", "PUT", "PATCH"]:
                     body_arg = f", data={repr(post_data)}" if post_data else ""
                     lines.append(f"        res = await page.request.{method.lower()}({repr(req_url)}{body_arg})")

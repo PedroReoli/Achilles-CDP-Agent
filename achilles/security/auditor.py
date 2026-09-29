@@ -1,10 +1,10 @@
 """
 auditor.py — Motor de Auditoria OWASP Top 10, API Security e Hardening de Banco de Dados.
 """
-import re
-import json
 import base64
-from typing import Dict, Any, List
+import json
+import re
+from typing import Any, Dict, List
 
 
 class SecurityAuditor:
@@ -124,7 +124,7 @@ class SecurityAuditor:
         all_storage = {**{f"localStorage.{k}": v for k, v in local_storage.items()}, **{f"sessionStorage.{k}": v for k, v in session_storage.items()}}
         for k, v in all_storage.items():
             if isinstance(v, str) and "eyJhbGciOi" in v:
-                jwt_res = cls.inspect_jwt(v)
+                cls.inspect_jwt(v)
                 findings.append({
                     "category": "STORAGE",
                     "owasp": "A02:2021-Cryptographic Failures",

@@ -1,8 +1,7 @@
 """
 network_recorder.py — Buffer de requisições de rede, gerador de cURLs e exportador Postman v2.1.0.
 """
-import json
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 

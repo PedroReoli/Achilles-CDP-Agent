@@ -2,8 +2,9 @@
 cdp_driver.py — Gerenciador assíncrono e resiliente de conexão Chrome CDP (porta 9222).
 """
 import asyncio
-from typing import Optional, Dict, Any, List
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from typing import Any, List, Optional
+
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 
 class CDPDriver:

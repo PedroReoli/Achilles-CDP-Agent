@@ -2,10 +2,11 @@
 test_achilles.py — Suíte de testes unitários do Achilles CDP Agent.
 """
 import unittest
+
 from achilles.core.dom_parser import DOMSemanticParser
 from achilles.core.network_recorder import NetworkRecorder
-from achilles.security.auditor import SecurityAuditor
 from achilles.reverse_api.openapi import OpenAPIGenerator
+from achilles.security.auditor import SecurityAuditor
 from achilles.testing.playwright_exporter import PlaywrightTestExporter
 
 

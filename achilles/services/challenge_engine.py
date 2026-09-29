@@ -11,7 +11,7 @@ from .hud import HudManager
 from .session_manager import BrowserSessionManager
 
 if TYPE_CHECKING:
-    from playwright.async_api import Page
+    pass
 
 LOG = logging.getLogger(__name__)
 

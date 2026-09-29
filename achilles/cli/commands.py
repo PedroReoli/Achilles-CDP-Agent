@@ -790,8 +790,8 @@ async def run_wait_challenge(
         should_close = True
 
     try:
-        console.print(f"[bold yellow][!][/] [bold #e9d5ff]Monitorando desafios anti-bot / 2FA / Login...[/]")
-        console.print(f"[dim #94a3b8]    Se houver CAPTCHA ou login na janela do Chrome, resolva diretamente no navegador.[/]")
+        console.print("[bold yellow][!][/] [bold #e9d5ff]Monitorando desafios anti-bot / 2FA / Login...[/]")
+        console.print("[dim #94a3b8]    Se houver CAPTCHA ou login na janela do Chrome, resolva diretamente no navegador.[/]")
         res = await services.call(
             "browser_wait_for_challenge", {"page_id": page_id, "timeout_s": timeout_s}
         )
@@ -1010,7 +1010,6 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
     services = ApplicationServices(cdp_port)
     current_page_id: Optional[str] = None
     current_url: str = "about:blank"
-    latest_snapshot: Optional[Dict[str, Any]] = None
 
     # Tenta obter ou abrir a primeira aba para NUNCA ficar em (sem aba)
     for _ in range(15):
@@ -1085,7 +1084,7 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                     current_url = pages[0]["url"]
             elif cmd == "select":
                 if not args:
-                    console.print(f"[yellow]Uso/Usage: /select <# ou page_id>[/]")
+                    console.print("[yellow]Uso/Usage: /select <# ou page_id>[/]")
                     continue
                 arg_val = args[0]
                 res_p = await services.call("browser_list_pages", {})
@@ -1171,7 +1170,7 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                         amount = int(first)
                 
                 try:
-                    res_scr = await services.call("browser_scroll", {
+                    await services.call("browser_scroll", {
                         "direction": direction,
                         "amount": amount,
                         "page_id": current_page_id
@@ -1183,7 +1182,7 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 await run_snapshot(cdp_port, i18n=i18n, page_id=current_page_id, limit=200, services=services)
             elif cmd == "click":
                 if not args:
-                    console.print(f"[yellow]Uso/Usage: /click <element_ref>[/]")
+                    console.print("[yellow]Uso/Usage: /click <element_ref>[/]")
                     continue
                 ref = args[0]
                 snap = await services.call("browser_snapshot", {"page_id": current_page_id, "limit": 200})
@@ -1197,7 +1196,7 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 console.print(f"[bold green][+][/] {i18n.t('click_success')} [bold cyan][{ref}][/]! ([dim]{res_act.get('duration_ms', 0)}ms[/])")
             elif cmd == "fill":
                 if len(args) < 2:
-                    console.print(f"[yellow]Uso/Usage: /fill <element_ref> <text>[/]")
+                    console.print("[yellow]Uso/Usage: /fill <element_ref> <text>[/]")
                     continue
                 ref = args[0]
                 text = " ".join(args[1:])
@@ -1216,7 +1215,7 @@ async def run_interactive(cdp_port: int, lang: Optional[str] = None) -> None:
                 await run_traffic(cdp_port, i18n=i18n, page_id=current_page_id, limit=limit, services=services)
             elif cmd == "curl":
                 if not args:
-                    console.print(f"[yellow]Uso/Usage: /curl <request_id>[/]")
+                    console.print("[yellow]Uso/Usage: /curl <request_id>[/]")
                     continue
                 req_id = args[0]
                 res_c = await services.call("network_curl", {"request_id": req_id, "shell": "powershell"})

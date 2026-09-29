@@ -1,7 +1,7 @@
 """
 dom_parser.py — Extrator de DOM Semântico e Árvore de Acessibilidade Otimizada para LLMs.
 """
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 
 class DOMSemanticParser:

@@ -31,7 +31,7 @@ class ActionResolver:
         key, page = await self.session.page(page_id)
         async with self.session.registry.locks[key]:
             target = self.observations.target(snapshot_id, element_ref, key)
-            before = await self.observations.capture(key, page, 1000, include_ax=False)
+            before = await self.observations.capture(key, page, 1000, include_ax=False, fast=True)
             current = next((e for e in before["elements"] if e["element_ref"] == element_ref), None)
             if current is None or any(
                 current[k] != target[k] for k in ("role", "name", "tag", "type")
@@ -90,7 +90,7 @@ class ActionResolver:
                 result["verification"] = {"status": "page_closed"}
                 return result
             try:
-                after = await self.observations.capture(key, page, 1000, include_ax=False)
+                after = await self.observations.capture(key, page, 1000, include_ax=False, fast=True)
                 result["url_after"] = after["url"]
                 old_refs = {e["element_ref"] for e in before["elements"]}
                 new_refs = {e["element_ref"] for e in after["elements"]}

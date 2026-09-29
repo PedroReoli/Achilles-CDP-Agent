@@ -1,7 +1,11 @@
 """In-browser Floating HUD Overlay (Closed Shadow DOM) para transparência de navegação."""
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import os
+import sys
+from typing import TYPE_CHECKING, Optional
+
+from .native_hud import NativeHudOverlay
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -132,12 +136,6 @@ HUD_SCRIPT = r"""({status, message}) => {
         return false;
     }
 }"""
-
-
-import os
-import sys
-
-from .native_hud import NativeHudOverlay
 
 
 class HudManager:

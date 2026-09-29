@@ -3,6 +3,7 @@ test_cli_commands.py — Testes unitários para comandos CLI e interface do Achi
 """
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from achilles.cli import commands
 from achilles.cli.app import build_parser
 from achilles.cli.i18n import I18n

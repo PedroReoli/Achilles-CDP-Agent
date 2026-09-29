@@ -1,10 +1,10 @@
 """
 openapi.py — Gerador Reverso de OpenAPI 3.0.0 e Swagger UI Dinâmico.
 """
-import re
 import json
-from typing import Dict, Any, List
-from urllib.parse import urlparse, parse_qs
+import re
+from typing import Any, Dict, List
+from urllib.parse import parse_qs, urlparse
 
 
 class OpenAPIGenerator:
