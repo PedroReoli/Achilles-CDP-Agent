@@ -73,6 +73,21 @@ class TestCliCommands(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args_curl.request_id, "req_123")
         self.assertEqual(args_curl.shell, "powershell")
 
+        args_call = build_parser().parse_args([
+            "call",
+            "browser_status",
+            "--arguments",
+            "{}",
+            "--api-url",
+            "http://127.0.0.1:8765",
+        ])
+        self.assertEqual(args_call.tool, "browser_status")
+        self.assertEqual(args_call.arguments, "{}")
+        self.assertEqual(args_call.api_url, "http://127.0.0.1:8765")
+
+        args_mcp = build_parser().parse_args(["mcp", "--tools", "core,network"])
+        self.assertEqual(args_mcp.tools, "core,network")
+
     def test_extension_command_prepares_browser_files(self):
         self.assertTrue(build_parser().parse_args(["--extension"]).extension)
         with tempfile.TemporaryDirectory() as root:

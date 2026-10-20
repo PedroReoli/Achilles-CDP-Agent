@@ -9,12 +9,9 @@ Executa uma sessão de automação ponta a ponta com:
 """
 
 import asyncio
-import json
-import os
 import socket
 import sys
 from pathlib import Path
-from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 if sys.platform == "win32":
@@ -22,6 +19,7 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding="utf-8")
 
 from playwright.async_api import async_playwright
+
 from achilles.services.application import ApplicationServices
 
 

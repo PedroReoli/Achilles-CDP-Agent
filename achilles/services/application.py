@@ -66,6 +66,23 @@ class ReadArguments(PageArguments):
     max_length: int = Field(50000, ge=100, le=500000)
 
 
+class FindArguments(PageArguments):
+    query: str = Field(min_length=1, max_length=512)
+    limit: int = Field(20, ge=1, le=100)
+    role: Optional[str] = Field(None, min_length=1, max_length=64)
+
+
+class ExtractField(Arguments):
+    selector: str = Field("", max_length=512)
+    attribute: Optional[str] = Field(None, min_length=1, max_length=128)
+
+
+class ExtractArguments(PageArguments):
+    items_selector: str = Field(min_length=1, max_length=512)
+    fields: Dict[str, ExtractField] = Field(min_length=1, max_length=50)
+    limit: int = Field(100, ge=1, le=1000)
+
+
 class ReportArguments(PageArguments):
     pass
 
@@ -86,6 +103,7 @@ class ActionArguments(Arguments):
     element_ref: str = Field(min_length=1, max_length=256)
     value: Optional[str] = Field(None, max_length=65536)
     timeout_ms: int = Field(5000, ge=100, le=30000)
+    verify: Literal["target", "snapshot", "none"] = "target"
 
     @model_validator(mode="after")
     def value_required(self) -> "ActionArguments":
@@ -154,6 +172,8 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "browser_scroll": ScrollArguments,
     "browser_snapshot": SnapshotArguments,
     "browser_read_content": ReadArguments,
+    "browser_find": FindArguments,
+    "browser_extract": ExtractArguments,
     "browser_report": ReportArguments,
     "browser_action": ActionArguments,
     "browser_wait_for_challenge": WaitForChallengeArguments,
@@ -179,6 +199,8 @@ DESCRIPTIONS = {
     "browser_scroll": "Rola a página ou container (up, down, top, bottom) para lazy-load ou infinite scroll.",
     "browser_snapshot": "Snapshot versionado, incluindo frames e Shadow DOM aberto.",
     "browser_read_content": "Lê o conteúdo principal da página em Markdown limpo (Reader Mode), eliminando scripts, estilos, anúncios e banners para máxima economia de tokens (~95%).",
+    "browser_find": "Busca elementos por texto, papel ou dica e retorna apenas correspondências com referências acionáveis.",
+    "browser_extract": "Extrai registros estruturados por seletores CSS declarativos, sem executar JavaScript arbitrário.",
     "browser_report": "Relatório executivo de economia de tokens e análise de rotas e tráfego de API da sessão.",
     "browser_action": "Executa Locator e retorna observação posterior; não repete a ação automaticamente.",
     "browser_wait_for_challenge": "Detecta desafios anti-bot (Turnstile, reCAPTCHA, hCaptcha, WAF) e 2FA/OTP, aguardando resolução humana cooperativa.",
@@ -194,6 +216,47 @@ DESCRIPTIONS = {
     "network_postman": "Coleção Postman 2.1 com credenciais redigidas.",
     "security_audit": "Auditoria passiva com evidência e cobertura ausente explícitas.",
 }
+
+TOOLSETS = {
+    "core": {
+        "browser_status",
+        "browser_list_pages",
+        "browser_select_page",
+        "browser_new_tab",
+        "browser_close_tab",
+        "browser_navigate",
+        "browser_scroll",
+        "browser_snapshot",
+        "browser_read_content",
+        "browser_find",
+        "browser_extract",
+        "browser_action",
+        "browser_wait_for_challenge",
+    },
+    "network": {"network_query", "network_curl", "network_postman"},
+    "security": {"security_audit", "browser_report", "browser_export_html_report"},
+    "memory": {"browser_domain_memory"},
+    "bookmarks": {
+        "browser_bookmarks_list",
+        "browser_bookmarks_search",
+        "browser_bookmarks_create",
+        "browser_bookmarks_update",
+        "browser_bookmarks_remove",
+    },
+}
+
+
+def resolve_toolsets(value: str) -> Optional[set]:
+    names = {item.strip().lower() for item in value.split(",") if item.strip()}
+    if not names or "all" in names:
+        return None
+    unknown = names - set(TOOLSETS)
+    if unknown:
+        raise ValueError("Toolset desconhecido: " + ", ".join(sorted(unknown)))
+    selected = set()
+    for name in names:
+        selected.update(TOOLSETS[name])
+    return selected
 
 
 class ApplicationServices:
@@ -211,24 +274,95 @@ class ApplicationServices:
         self.challenge_events = deque(maxlen=50)
 
     @staticmethod
-    def tools() -> Dict[str, Any]:
-        return {
-            "tools": [
-                {
-                    "name": name,
-                    "description": DESCRIPTIONS[name],
-                    "inputSchema": contract.model_json_schema(),
-                    "outputSchema": {"type": "object", "additionalProperties": True},
-                    "annotations": {
-                        "readOnlyHint": name not in ("browser_action", "browser_select_page", "browser_new_tab", "browser_close_tab", "browser_domain_memory", "browser_bookmarks_create", "browser_bookmarks_update", "browser_bookmarks_remove"),
-                        "destructiveHint": name in ("browser_action", "browser_close_tab", "browser_bookmarks_remove"),
-                        "idempotentHint": name not in ("browser_action", "browser_new_tab", "browser_close_tab", "browser_bookmarks_create", "browser_bookmarks_remove"),
-                        "openWorldHint": True,
-                    },
-                }
-                for name, contract in CONTRACTS.items()
-            ]
+    def tools(allowed_names: Optional[set] = None) -> Dict[str, Any]:
+        output_schemas = {
+            "browser_status": {
+                "type": "object",
+                "properties": {
+                    "cdp_url": {"type": "string"},
+                    "mode": {"type": "string"},
+                    "generation": {"type": "integer"},
+                    "recorded_requests": {"type": "integer"},
+                    "dropped_events": {"type": "integer"},
+                },
+                "required": ["cdp_url", "mode", "generation", "recorded_requests"],
+            },
+            "browser_find": {
+                "type": "object",
+                "properties": {
+                    "page_id": {"type": "string"},
+                    "snapshot_id": {"type": "string"},
+                    "query": {"type": "string"},
+                    "matches": {"type": "array", "items": {"type": "object"}},
+                    "match_count": {"type": "integer"},
+                    "truncated": {"type": "boolean"},
+                },
+                "required": ["page_id", "snapshot_id", "query", "matches", "match_count"],
+            },
+            "browser_extract": {
+                "type": "object",
+                "properties": {
+                    "page_id": {"type": "string"},
+                    "url": {"type": "string"},
+                    "items": {"type": "array", "items": {"type": "object"}},
+                    "count": {"type": "integer"},
+                    "truncated": {"type": "boolean"},
+                },
+                "required": ["page_id", "url", "items", "count", "truncated"],
+            },
+            "browser_action": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                    "action": {"type": "string"},
+                    "page_id": {"type": "string"},
+                    "url_after": {"type": "string"},
+                    "duration_ms": {"type": "number"},
+                    "verification": {"type": "object"},
+                },
+                "required": ["status", "action", "page_id", "duration_ms", "verification"],
+            },
         }
+        mutating = {
+            "browser_select_page",
+            "browser_new_tab",
+            "browser_close_tab",
+            "browser_navigate",
+            "browser_scroll",
+            "browser_action",
+            "browser_domain_memory",
+            "browser_export_html_report",
+            "browser_bookmarks_create",
+            "browser_bookmarks_update",
+            "browser_bookmarks_remove",
+        }
+        destructive = {"browser_action", "browser_close_tab", "browser_bookmarks_remove"}
+        non_idempotent = {
+            "browser_action",
+            "browser_new_tab",
+            "browser_close_tab",
+            "browser_bookmarks_create",
+            "browser_bookmarks_remove",
+        }
+        tools = []
+        for name, contract in CONTRACTS.items():
+            if allowed_names is not None and name not in allowed_names:
+                continue
+            tool = {
+                "name": name,
+                "description": DESCRIPTIONS[name],
+                "inputSchema": contract.model_json_schema(),
+                "annotations": {
+                    "readOnlyHint": name not in mutating,
+                    "destructiveHint": name in destructive,
+                    "idempotentHint": name not in non_idempotent,
+                    "openWorldHint": name.startswith(("browser_", "network_")),
+                },
+            }
+            if name in output_schemas:
+                tool["outputSchema"] = output_schemas[name]
+            tools.append(tool)
+        return {"tools": tools}
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         started = time.perf_counter()
@@ -303,6 +437,10 @@ class ApplicationServices:
             return await self.observations.snapshot(**args)
         if name == "browser_read_content":
             return await self.observations.read_content(**args)
+        if name == "browser_find":
+            return await self.observations.find(**args)
+        if name == "browser_extract":
+            return await self.observations.extract(**args)
         if name == "browser_report":
             return await self.get_report(**args)
         if name == "browser_action":
@@ -393,9 +531,7 @@ class ApplicationServices:
                 "navigator_webdriver_masked": True,
                 "persistent_profile_active": True,
                 "secret_redaction_active": True,
-                "canvas_2d_noise_active": True,
-                "webgl_vendor_spoofing_active": True,
-                "audio_buffer_jitter_active": True,
+                "native_fingerprint_preserved": True,
             },
         }
 

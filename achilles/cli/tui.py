@@ -6,6 +6,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from achilles import __version__
+
 console = Console()
 
 
@@ -17,7 +19,7 @@ def render_banner():
 /_/ |_|\__/ /_//_/ /_//_//_/  \__//___/    \___/  /____/  /_/     \_, / \__/ /_//_/\__/ 
                                                                  /___/                  
     """
-    console.print(Panel(Text(banner_text, style="bold cyan"), title="[bold white]Achilles CDP Agent[/bold white]", subtitle="[bold green]Achilles v2.1 — AI & DevTools Protocol Engine[/bold green]", border_style="cyan"))
+    console.print(Panel(Text(banner_text, style="bold cyan"), title="[bold white]Achilles CDP Agent[/bold white]", subtitle=f"[bold green]Achilles v{__version__} — AI & DevTools Protocol Engine[/bold green]", border_style="cyan"))
 
 
 def render_status_table(cdp_port: int, api_port: int, status: str, active_url: str, requests_count: int, risk_score: int):

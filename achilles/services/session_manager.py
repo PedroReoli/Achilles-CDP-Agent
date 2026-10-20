@@ -52,77 +52,8 @@ STEALTH_SCRIPT = """
             });
         }
 
-        // 4. Hardware metrics consistency
-        if (!navigator.hardwareConcurrency || navigator.hardwareConcurrency < 4) {
-            Object.defineProperty(navigator, 'hardwareConcurrency', {
-                get: () => 8,
-                configurable: true
-            });
-        }
-        if (!navigator.deviceMemory || navigator.deviceMemory < 4) {
-            Object.defineProperty(navigator, 'deviceMemory', {
-                get: () => 8,
-                configurable: true
-            });
-        }
-
-        // 5. Plugin array emulation
-        if (navigator.plugins && navigator.plugins.length === 0) {
-            const mockPlugins = [
-                { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' }
-            ];
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => mockPlugins,
-                configurable: true
-            });
-        }
-
-        // 6. WebGL Unmasked Vendor & Renderer Spoofing
-        const getParameterWrapper = (original) => function(parameter) {
-            if (parameter === 37445) { // UNMASKED_VENDOR_WEBGL
-                return 'Google Inc. (NVIDIA)';
-            }
-            if (parameter === 37446) { // UNMASKED_RENDERER_WEBGL
-                return 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-            }
-            return original.call(this, parameter);
-        };
-
-        if (window.WebGLRenderingContext) {
-            const origGetParam = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = getParameterWrapper(origGetParam);
-        }
-        if (window.WebGL2RenderingContext) {
-            const origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = getParameterWrapper(origGetParam2);
-        }
-
-        // 7. Canvas Fingerprint Micro-Noise
-        if (window.CanvasRenderingContext2D) {
-            const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-            CanvasRenderingContext2D.prototype.getImageData = function(sx, sy, sw, sh, settings) {
-                const imageData = origGetImageData.call(this, sx, sy, sw, sh, settings);
-                if (imageData && imageData.data && imageData.data.length > 4) {
-                    // Micro-shift least significant bit of first pixel
-                    imageData.data[0] = (imageData.data[0] ^ 1);
-                }
-                return imageData;
-            };
-        }
-
-        // 8. Web Audio API Acoustic Micro-Jitter
-        if (window.AudioBuffer) {
-            const origGetChannelData = AudioBuffer.prototype.getChannelData;
-            AudioBuffer.prototype.getChannelData = function(channel) {
-                const data = origGetChannelData.call(this, channel);
-                if (data && data.length > 10) {
-                    data[0] += 0.0000001;
-                }
-                return data;
-            };
-        }
+        // Preserve the browser's real hardware, WebGL, Canvas and Audio values.
+        // Fabricated combinations are easier to detect than a coherent native profile.
     } catch (e) {}
 })();
 """

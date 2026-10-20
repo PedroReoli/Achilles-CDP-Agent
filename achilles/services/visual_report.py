@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from achilles import __version__
+
 
 def generate_html_report(
     token_metrics: Optional[Dict[str, Any]] = None,
@@ -99,9 +101,7 @@ def generate_html_report(
     stealth_labels = {
         "automation_controlled_disabled": "Chromium AutomationControlled desativado",
         "navigator_webdriver_masked": "Navigator webdriver mascarado",
-        "canvas_2d_noise_active": "Ruído de Canvas configurado",
-        "webgl_vendor_spoofing_active": "WebGL configurado",
-        "audio_buffer_jitter_active": "Jitter de áudio configurado",
+        "native_fingerprint_preserved": "Fingerprint nativo preservado",
         "persistent_profile_active": "Perfil persistente configurado",
         "secret_redaction_active": "Redação de segredos configurada",
     }
@@ -388,7 +388,7 @@ def generate_html_report(
         </div>
 
         <footer>
-            Achilles CDP Agent v2.1 • Relatório local da sessão com URLs redigidas
+            Achilles CDP Agent v{__version__} • Relatório local da sessão com URLs redigidas
         </footer>
     </div>
 </body>

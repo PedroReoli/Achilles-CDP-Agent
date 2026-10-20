@@ -1,6 +1,7 @@
 """Ações com Locators nativos e resultado Observe → Act → Verify."""
 
 import asyncio
+import time
 from typing import Any, Dict, Optional
 
 from .errors import ServiceError
@@ -23,23 +24,17 @@ class ActionResolver:
         page_id: str,
         value: Optional[str] = None,
         timeout_ms: int = 5000,
+        verify: str = "target",
     ) -> Dict[str, Any]:
+        started = time.perf_counter()
         if action not in ("click", "fill", "hover", "press", "select"):
             raise ServiceError("INVALID_ARGUMENT", "Ação inválida.")
         if action in ("fill", "press", "select") and value is None:
             raise ServiceError("INVALID_ARGUMENT", "A ação exige value.")
         key, page = await self.session.page(page_id)
+        url_before = redact_url(page.url)
         async with self.session.registry.locks[key]:
             target = self.observations.target(snapshot_id, element_ref, key)
-            before = await self.observations.capture(key, page, 1000, include_ax=False, fast=True)
-            current = next((e for e in before["elements"] if e["element_ref"] == element_ref), None)
-            if current is None or any(
-                current[k] != target[k] for k in ("role", "name", "tag", "type")
-            ):
-                raise ServiceError(
-                    "STALE_ELEMENT_REF",
-                    "O elemento mudou ou foi substituído; capture novo snapshot.",
-                )
             frame = self.session.registry.frames.get(target["frame_id"])
             if frame is None or frame.is_detached():
                 raise ServiceError("STALE_ELEMENT_REF", "O frame foi removido.")
@@ -50,6 +45,20 @@ class ActionResolver:
             try:
                 if await locator.count() != 1:
                     raise ServiceError("STALE_ELEMENT_REF", "Identidade do nó não é mais única.")
+                current = await locator.evaluate(
+                    """node => ({
+                        tag: node.tagName.toLowerCase(),
+                        type: node.type || '',
+                        name: node.getAttribute('aria-label') || node.innerText || node.value || ''
+                    })"""
+                )
+                if current.get("tag") != target.get("tag") or current.get(
+                    "type", ""
+                ) != target.get("type", ""):
+                    raise ServiceError(
+                        "STALE_ELEMENT_REF",
+                        "O elemento mudou ou foi substituído; capture novo snapshot.",
+                    )
                 await HudManager.update(page, status="acting", message=f"Executando {action}...")
                 if action == "click":
                     await locator.click(timeout=timeout_ms)
@@ -85,23 +94,30 @@ class ActionResolver:
                 "action": action,
                 "page_id": key,
                 "url_after": redact_url(page.url),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             }
             if page.is_closed():
                 result["verification"] = {"status": "page_closed"}
                 return result
+            if verify == "none":
+                result["verification"] = {"status": "skipped"}
+                return result
             try:
-                after = await self.observations.capture(key, page, 1000, include_ax=False, fast=True)
-                result["url_after"] = after["url"]
-                old_refs = {e["element_ref"] for e in before["elements"]}
-                new_refs = {e["element_ref"] for e in after["elements"]}
+                result["url_after"] = redact_url(page.url)
+                attached = False if page.is_closed() else await locator.count() == 1
                 result["verification"] = {
                     "status": "observed",
-                    "dom_revision_before": before["dom_revision"],
-                    "dom_revision_after": after["dom_revision"],
-                    "added": sorted(new_refs - old_refs),
-                    "removed": sorted(old_refs - new_refs),
-                    "snapshot": after,
+                    "mode": "target",
+                    "target_attached": attached,
+                    "url_changed": result["url_after"] != url_before,
                 }
+                if verify == "snapshot":
+                    result["verification"]["snapshot"] = await self.observations.capture(
+                        key, page, 200, include_ax=False, fast=True
+                    )
             except Exception:
-                result["verification"] = {"status": "unavailable", "code": "NAVIGATION_INTERRUPTED"}
+                result["verification"] = {
+                    "status": "unavailable",
+                    "code": "NAVIGATION_INTERRUPTED",
+                }
             return result

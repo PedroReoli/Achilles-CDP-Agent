@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from achilles import __version__
+
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Achilles"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -39,7 +41,7 @@ def set_stored_language(lang: str) -> None:
 
 STRINGS: Dict[str, Dict[str, str]] = {
     "pt": {
-        "banner_subtitle": "ACHILLES CDP AGENT • Automação e Segurança de Navegador • Achilles v2.1",
+        "banner_subtitle": f"ACHILLES CDP AGENT • Automação e Segurança de Navegador • Achilles v{__version__}",
         "connecting": "Conectando ao Chrome CDP na porta",
         "connected": "Conectado ao Chrome com sucesso!",
         "type_help": "Digite [bold #c084fc]/help[/] para comandos ou [bold #c084fc]/exit[/] para sair.",
@@ -118,7 +120,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "goodbye": "Achilles encerrado com sucesso. Até logo!",
     },
     "en": {
-        "banner_subtitle": "ACHILLES CDP AGENT • Autonomous Browser Automation & Security • Achilles v2.1",
+        "banner_subtitle": f"ACHILLES CDP AGENT • Autonomous Browser Automation & Security • Achilles v{__version__}",
         "connecting": "Connecting to Chrome CDP on port",
         "connected": "Connected to Chrome successfully!",
         "type_help": "Type [bold #c084fc]/help[/] for commands or [bold #c084fc]/exit[/] to quit.",

@@ -23,6 +23,12 @@ HTML = b"""<!doctype html><html><head><title>Fixture</title></head><body>
 </body></html>"""
 
 
+def browser_launch_options() -> dict[str, str]:
+    """Allow local runs to reuse an installed Chromium-compatible browser."""
+    executable = os.environ.get("ACHILLES_BROWSER_EXECUTABLE")
+    return {"executable_path": executable} if executable else {"channel": "chromium"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/frame":
@@ -114,8 +120,8 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             owner = await async_playwright().start()
             context = await owner.chromium.launch_persistent_context(
                 profile,
-                channel="chromium",
                 headless=True,
+                **browser_launch_options(),
                 args=[
                     f"--remote-debugging-port={cdp_port}",
                     f"--disable-extensions-except={extension}",
@@ -158,7 +164,9 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             cdp_port = sock.getsockname()[1]
         owner = await async_playwright().start()
         browser = await owner.chromium.launch(
-            headless=True, args=[f"--remote-debugging-port={cdp_port}"]
+            headless=True,
+            **browser_launch_options(),
+            args=[f"--remote-debugging-port={cdp_port}"],
         )
         context = await browser.new_context()
         owned_page = await context.new_page()
@@ -188,6 +196,23 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue({"Name", "Save", "Shadow", "Frame", "Nested"}.issubset(
                 {e["name"] for e in fast_snapshot["elements"]}
             ))
+            found = await app.call(
+                "browser_find", {"page_id": page_id, "query": "Save", "limit": 5}
+            )
+            self.assertEqual(found["match_count"], 1)
+            self.assertEqual(found["matches"][0]["name"], "Save")
+            extracted = await app.call(
+                "browser_extract",
+                {
+                    "page_id": page_id,
+                    "items_selector": "body",
+                    "fields": {
+                        "button": {"selector": "#save"},
+                        "input_type": {"selector": "#name", "attribute": "type"},
+                    },
+                },
+            )
+            self.assertEqual(extracted["items"], [{"button": "Save", "input_type": None}])
 
             async def act(name: str, action: str, value: str = "") -> dict:
                 snap = await app.observations.snapshot(page_id)
@@ -250,7 +275,9 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.session.generation, 2)
             await browser.close()
             browser = await owner.chromium.launch(
-                headless=True, args=[f"--remote-debugging-port={cdp_port}"]
+                headless=True,
+                **browser_launch_options(),
+                args=[f"--remote-debugging-port={cdp_port}"],
             )
             replacement = await browser.new_context()
             await replacement.new_page()

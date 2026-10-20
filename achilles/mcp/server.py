@@ -1,4 +1,4 @@
-"""MCP stdio JSON-RPC para Python 3.9, sem dependência do SDK 3.10+."""
+"""MCP stdio JSON-RPC enxuto e compatível com clientes legados e modernos."""
 
 import asyncio
 import copy
@@ -6,14 +6,20 @@ import json
 import sys
 from typing import Any, Dict, Optional, Union
 
-from achilles.services.application import ApplicationServices
+from achilles import __version__
+from achilles.services.application import ApplicationServices, resolve_toolsets
 from achilles.services.errors import ServiceError
 
 RequestId = Union[str, int]
 MODERN_VERSION = "2026-07-28"
 LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2024-11-05")
 VERSIONS = (MODERN_VERSION,) + LEGACY_VERSIONS
-SERVER_INFO = {"name": "achilles-cdp", "version": "2.1.0"}
+SERVER_INFO = {"name": "achilles-cdp", "version": __version__}
+SERVER_INSTRUCTIONS = (
+    "Use browser_find antes de browser_action quando não houver referência recente. "
+    "Use browser_extract para listas estruturadas. Desafios CAPTCHA e 2FA exigem "
+    "browser_wait_for_challenge e resolução humana."
+)
 VERSION_META = "io.modelcontextprotocol/protocolVersion"
 CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
 SERVER_INFO_META = "io.modelcontextprotocol/serverInfo"
@@ -65,8 +71,9 @@ def encode_response(response: Dict[str, Any]) -> bytes:
 
 
 class MCPServer:
-    def __init__(self, services: ApplicationServices) -> None:
+    def __init__(self, services: ApplicationServices, allowed_tools: Optional[set] = None) -> None:
         self.services = services
+        self.allowed_tools = allowed_tools
         self.initialized = False
         self.negotiated = False
         self.version = LEGACY_VERSIONS[0]
@@ -109,6 +116,7 @@ class MCPServer:
                 "protocolVersion": self.version,
                 "capabilities": {"tools": {}},
                 "serverInfo": SERVER_INFO,
+                "instructions": SERVER_INSTRUCTIONS,
             }
         elif method == "ping" and self.era != "modern":
             result = {}
@@ -140,7 +148,7 @@ class MCPServer:
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
-                result = self.services.tools()
+                result = self.services.tools(self.allowed_tools)
                 if not modern and self.version == "2024-11-05":
                     for tool in result["tools"]:
                         tool.pop("outputSchema", None)
@@ -150,6 +158,8 @@ class MCPServer:
                 arguments = params.get("arguments", {})
                 if not isinstance(name, str) or not isinstance(arguments, dict):
                     return self.error(request_id, -32602, "Invalid tool arguments")
+                if self.allowed_tools is not None and name not in self.allowed_tools:
+                    return self.error(request_id, -32601, "Tool not enabled in this toolset")
                 try:
                     data = await self.services.call(name, arguments)
                     text_payload = data
@@ -189,9 +199,9 @@ class MCPServer:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-async def run_mcp_stdio(cdp_port: int = 9222) -> None:
+async def run_mcp_stdio(cdp_port: int = 9222, toolsets: str = "core") -> None:
     services = ApplicationServices(cdp_port)
-    server = MCPServer(services)
+    server = MCPServer(services, resolve_toolsets(toolsets))
     pending: Dict[RequestId, asyncio.Task[Any]] = {}
     output_lock = asyncio.Lock()
 
@@ -229,6 +239,8 @@ async def run_mcp_stdio(cdp_port: int = 9222) -> None:
             line = await asyncio.to_thread(sys.stdin.buffer.readline, MAX_MESSAGE_BYTES + 1)
             if not line:
                 break
+            if not line.strip():
+                continue
             if len(line) > MAX_MESSAGE_BYTES:
                 while not line.endswith(b"\n"):
                     line = await asyncio.to_thread(sys.stdin.buffer.readline, MAX_MESSAGE_BYTES + 1)

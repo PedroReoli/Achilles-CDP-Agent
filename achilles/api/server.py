@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from achilles import __version__
 from achilles.services.application import ApplicationServices
 from achilles.services.errors import ServiceError
 
@@ -73,7 +74,7 @@ def create_app(
 
     app = FastAPI(
         title="Achilles CDP Agent",
-        version="2.1.0",
+        version=__version__,
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,

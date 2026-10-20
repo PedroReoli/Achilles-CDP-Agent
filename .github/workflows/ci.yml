@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout repository
@@ -54,8 +54,8 @@ jobs:
 
       - name: Build wheel and source distribution
         run: |
-          python -m pip wheel . --no-deps --wheel-dir dist
-          python setup.py sdist --dist-dir dist
+          python -m pip install build
+          python -m build --wheel --sdist --outdir dist
 
       - name: Verify browser extension is packaged
         run: |

@@ -1,0 +1,26 @@
+name: Proposta de melhoria
+description: Sugira uma melhoria de produto ou integração
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema
+      description: Qual fluxo de agente ou usuário está difícil hoje?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado esperado
+      description: Descreva um critério observável de sucesso.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Uso responsável
+      options:
+        - label: A proposta não depende de evasão de CAPTCHA, autenticação ou controle de acesso.
+          required: true

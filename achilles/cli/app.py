@@ -6,6 +6,8 @@ import os
 import sys
 from typing import Optional, Sequence
 
+from achilles import __version__
+
 if sys.platform == "win32":
     try:
         if hasattr(sys.stdout, "reconfigure"):
@@ -30,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="achilles", description="Achilles — Chrome CDP Autonomous Agent & Security Suite"
     )
-    parser.add_argument("--version", action="version", version="achilles 2.1.0")
+    parser.add_argument("--version", action="version", version=f"achilles {__version__}")
     parser.add_argument("--lang", "-l", choices=["pt", "en"], default=None, help="Idioma da interface (pt / en)")
     parser.add_argument("--ai", action="store_true", help="Exibe o protocolo autônomo para agentes de IA")
     parser.add_argument("--extension", action="store_true", help="Prepara a extensão de favoritos na Área de Trabalho")
@@ -124,6 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
     # 13. MCP stdio
     mcp_p = commands.add_parser("mcp", help="Inicia MCP via stdio")
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    mcp_p.add_argument(
+        "--tools",
+        default="core",
+        help="Toolsets separados por vírgula: core,network,security,memory,bookmarks ou all",
+    )
 
     # 14. Doctor
     doctor_p = commands.add_parser("doctor", help="Executa testes de integridade e diagnósticos de produção")
@@ -169,6 +176,28 @@ def build_parser() -> argparse.ArgumentParser:
     update_p.add_argument("--url", default=None)
     remove_p = bookmark_actions.add_parser("remove", help="Remove favorito ou pasta vazia")
     remove_p.add_argument("id")
+
+    call_p = commands.add_parser(
+        "call", help="Executa uma ferramenta e retorna JSON estável para agentes e scripts"
+    )
+    call_p.add_argument("tool", help="Nome da ferramenta, por exemplo browser_status")
+    call_p.add_argument(
+        "--arguments",
+        "-a",
+        default="{}",
+        help="Objeto JSON, '-' para stdin ou '@arquivo.json'",
+    )
+    call_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    call_p.add_argument(
+        "--api-url",
+        default="",
+        help="Usa uma API Achilles persistente, por exemplo http://127.0.0.1:8765",
+    )
+    call_p.add_argument(
+        "--token",
+        default="",
+        help="Token da API; prefira a variável ACHILLES_API_TOKEN",
+    )
 
     return parser
 
@@ -292,7 +321,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
         elif args.command == "mcp":
             from achilles.mcp.server import run_mcp_stdio
-            asyncio.run(run_mcp_stdio(args.cdp_port))
+            asyncio.run(run_mcp_stdio(args.cdp_port, args.tools))
         elif args.command == "doctor":
             from achilles.cli.doctor import run_doctor
             if not asyncio.run(run_doctor(args.cdp_port, args.deep)):
@@ -344,6 +373,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             }[args.bookmark_operation]
             arguments = {field: getattr(args, field) for field in fields}
             asyncio.run(run_bookmarks(args.cdp_port, args.bookmark_operation, arguments))
+        elif args.command == "call":
+            from achilles.cli.agent import run_call
+
+            asyncio.run(
+                run_call(
+                    args.cdp_port,
+                    args.tool,
+                    args.arguments,
+                    api_url=args.api_url,
+                    token=args.token,
+                )
+            )
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

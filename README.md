@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="https://github.com/PedroReoli/Achilles-CDP-Agent/actions/workflows/ci.yml"><img src="https://github.com/PedroReoli/Achilles-CDP-Agent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="#-instalação-rápida"><img src="https://img.shields.io/badge/Python-3.9%2B-38bdf8?style=flat-square&logo=python" alt="Python 3.9+"></a>
+  <a href="#-instalação-rápida"><img src="https://img.shields.io/badge/Python-3.11%2B-38bdf8?style=flat-square&logo=python" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-f59e0b?style=flat-square" alt="License"></a>
 </p>
 
@@ -28,7 +28,7 @@
 
 O **Achilles CDP Agent** conecta agentes locais a uma sessão de Chrome, Chromium ou Edge exposta pelo **Chrome DevTools Protocol (CDP)**. CLI, servidor MCP stdio e REST local compartilham o mesmo catálogo de operações.
 
-O motor usa Playwright conectado por CDP para ações em páginas e chamadas CDP diretas para parte da observação. Pode iniciar um perfil persistente próprio se a porta estiver fechada. Navegação, login e resolução de desafios podem ocorrer com intervenção humana. Favoritos exigem uma extensão instalada no perfil controlado.
+O motor usa Playwright conectado por CDP para ações em páginas e chamadas CDP diretas para parte da observação. Pode iniciar um perfil persistente próprio se a porta estiver fechada. Navegação, login e resolução de desafios podem ocorrer com intervenção humana. Favoritos exigem uma extensão instalada no perfil controlado. O projeto preserva o fingerprint nativo do navegador em vez de fabricar hardware, Canvas, WebGL ou áudio.
 
 ---
 
@@ -40,7 +40,7 @@ O motor usa Playwright conectado por CDP para ações em páginas e chamadas CDP
 * O ganho de tamanho depende da página. O [benchmark reproduzível](.docs/benchmark.md) informa p50/p95 e uma **estimativa** de tokens para uma fixture local.
 
 ### 2. 🛡️ Ajustes de navegador e ações
-* Scripts de inicialização ajustam sinais de `navigator`, Canvas, WebGL e áudio nas páginas conectadas.
+* Scripts de inicialização reduzem sinais óbvios de automação sem fabricar hardware ou alterar Canvas, WebGL e áudio.
 * Ações usam Locators do Playwright, com identificação por snapshot, verificação posterior e digitação sequencial.
 * Esses ajustes não garantem invisibilidade nem resolução automática de bloqueios anti-bot.
 
@@ -86,7 +86,7 @@ graph TD
         Act["Action Resolver (Human Cadence)"]
         Chal["Challenge & 2FA Engine"]
         Mem["Domain Semantic Memory"]
-        Stealth["Multi-Surface Stealth (Canvas/WebGL/Audio)"]
+        Stealth["Browser Hardening com fingerprint nativo"]
         Redact["Redação de dados sensíveis"]
         Bookmarks["Favoritos"]
     end
@@ -122,27 +122,23 @@ graph TD
 
 ## 🚀 Instalação Rápida
 
-Requer Python 3.9+ e Chrome, Chromium ou Edge com endpoint CDP local. O Achilles tenta iniciar Chrome quando a porta está fechada; `ACHILLES_BROWSER=edge` seleciona Edge. O perfil iniciado automaticamente é separado do perfil pessoal. Para usar favoritos, instale a [extensão no perfil conectado](.docs/browser-bookmarks.md).
+Requer Python 3.11+, `uv` e Chrome, Chromium ou Edge. O Achilles tenta iniciar Chrome quando a porta CDP está fechada; `ACHILLES_BROWSER=edge` seleciona Edge. O perfil iniciado automaticamente é separado do perfil pessoal. Para usar favoritos, instale a [extensão no perfil conectado](.docs/browser-bookmarks.md).
 
 ### Windows (PowerShell)
 ```powershell
 git clone https://github.com/PedroReoli/Achilles-CDP-Agent.git
 cd Achilles-CDP-Agent
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m achilles doctor
+.\install.bat
 ```
 
 ### Linux / macOS
 ```bash
 git clone https://github.com/PedroReoli/Achilles-CDP-Agent.git
 cd Achilles-CDP-Agent
-python3 -m venv .venv
-./.venv/bin/python -m pip install -e .
-./.venv/bin/python -m achilles doctor
+./install.sh
 ```
 
-`install.bat` e `install.sh` também instalam a partir do checkout atual. Para executar testes de integração, instale `.[test]` e `python -m playwright install chromium` no mesmo ambiente virtual.
+`install.bat` e `install.sh` instalam o checkout como ferramenta isolada pelo `uv`, reparam o PATH quando aplicável e executam o diagnóstico. Para testes de integração, crie um ambiente de desenvolvimento com `uv sync --extra test` ou instale `.[test]` e o Chromium do Playwright.
 
 ---
 
@@ -155,7 +151,7 @@ Adicione o Achilles no arquivo de configuração do seu cliente MCP (`claude_des
   "mcpServers": {
     "achilles": {
       "command": "achilles",
-      "args": ["mcp", "--cdp-port", "9222"]
+      "args": ["mcp", "--cdp-port", "9222", "--tools", "core"]
     }
   }
 }
@@ -164,6 +160,8 @@ Adicione o Achilles no arquivo de configuração do seu cliente MCP (`claude_des
 O catálogo atual inclui ferramentas para páginas, rede, relatórios, segurança e favoritos. Exemplos:
 * `browser_read_content`: Extrai o conteúdo principal em Markdown.
 * `browser_snapshot`: Resume elementos interativos, frames e Shadow DOM aberto.
+* `browser_find`: Busca elementos relevantes sem devolver o snapshot inteiro ao agente.
+* `browser_extract`: Extrai listas estruturadas por seletores CSS declarativos.
 * `browser_action`: Executa cliques, preenchimentos com cadência humana, hover e teclas.
 * `browser_wait_for_challenge`: Aguarda resolução humana de CAPTCHA/2FA.
 * `browser_domain_memory`: Consulta e armazena memória de rotas por domínio.
@@ -204,6 +202,7 @@ O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela
 | `achilles traffic` | Exibe exchanges HTTP capturados com dados sensíveis mascarados |
 | `achilles start --port 8765` | Inicia a REST API local com autenticação Bearer |
 | `achilles mcp` | Inicia o servidor MCP via stdio |
+| `achilles call browser_status` | Executa uma ferramenta e retorna JSON estável para scripts/agentes |
 | `achilles --ai` | Exibe o protocolo autônomo com diretrizes para agentes de IA |
 
 ---
@@ -228,6 +227,32 @@ python scripts/benchmark.py --samples 20 --elements 50 --output benchmark.json
 ```
 
 O benchmark mede partida do Chromium, conexão CDP e p50/p95 aquecidos de `snapshot`, `read` e clique. A comparação de tokens usa a aproximação de quatro caracteres por token, sem tokenizer de LLM. Veja [método e limites](.docs/benchmark.md).
+
+### Diagnóstico de `achilles` ausente no PATH
+
+No Windows, execute `install.bat` e abra um terminal novo. O instalador usa um ambiente isolado do `uv`, adiciona `%USERPROFILE%\.local\bin` ao PATH do usuário e valida o executável. Confirme com:
+
+```powershell
+where.exe achilles
+achilles --version
+achilles doctor
+```
+
+Para agentes que preferem JSON sem tabelas ou cores:
+
+```powershell
+achilles call browser_find --arguments '{"query":"Entrar"}'
+achilles call browser_extract --arguments '{"items_selector":"article","fields":{"title":{"selector":"h2"},"url":{"selector":"a","attribute":"href"}}}'
+```
+
+Para preservar snapshots, tráfego e métricas entre vários comandos CLI, mantenha a API local ativa e use `--api-url`:
+
+```powershell
+$env:ACHILLES_API_TOKEN = "gere-um-token-local-forte"
+achilles start --port 8765
+# Em outro terminal, com a mesma variável:
+achilles call browser_status --api-url http://127.0.0.1:8765
+```
 
 ---
 

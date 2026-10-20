@@ -1,0 +1,33 @@
+name: Bug
+description: Reporte um comportamento incorreto reproduzível
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Comportamento observado
+      description: Inclua comando, saída redigida e resultado esperado.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão
+      placeholder: Saída de achilles --version
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Diagnóstico
+      description: Cole a saída de achilles doctor sem cookies, tokens ou dados privados.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Superfície
+      options: [MCP, CLI, REST, Navegador, Instalação]
+    validations:
+      required: true

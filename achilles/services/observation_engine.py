@@ -498,6 +498,81 @@ class ObservationEngine:
             }
             return result
 
+    async def find(
+        self,
+        query: str,
+        page_id: Optional[str] = None,
+        limit: int = 20,
+        role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Retorna somente elementos relevantes, reduzindo o payload enviado ao agente."""
+        snapshot = await self.snapshot(
+            page_id=page_id,
+            limit=1000,
+            in_viewport_only=False,
+            fast=True,
+        )
+        needle = query.casefold().strip()
+        matches = []
+        for element in snapshot.get("elements", []):
+            if role and element.get("role") != role:
+                continue
+            haystack = " ".join(
+                str(element.get(field, ""))
+                for field in ("name", "role", "test_id", "selector_hint")
+            ).casefold()
+            if needle in haystack:
+                matches.append(element)
+                if len(matches) >= limit:
+                    break
+        return {
+            "page_id": snapshot["page_id"],
+            "snapshot_id": snapshot["snapshot_id"],
+            "query": query,
+            "matches": matches,
+            "match_count": len(matches),
+            "truncated": len(matches) >= limit,
+        }
+
+    async def extract(
+        self,
+        items_selector: str,
+        fields: Dict[str, Dict[str, Optional[str]]],
+        page_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Extrai registros determinísticos por seletores CSS, sem executar código arbitrário."""
+        key, page = await self.session.page(page_id)
+        async with self.session.registry.locks[key]:
+            rows = await page.evaluate(
+                """({itemsSelector, fields, limit}) => {
+                    const roots = Array.from(document.querySelectorAll(itemsSelector)).slice(0, limit);
+                    return roots.map(root => {
+                        const row = {};
+                        for (const [name, spec] of Object.entries(fields)) {
+                            const node = spec.selector ? root.querySelector(spec.selector) : root;
+                            if (!node) { row[name] = null; continue; }
+                            row[name] = spec.attribute
+                                ? node.getAttribute(spec.attribute)
+                                : (node.innerText || node.textContent || '').trim();
+                        }
+                        return row;
+                    });
+                }""",
+                {
+                    "itemsSelector": items_selector,
+                    "fields": fields,
+                    "limit": limit,
+                },
+            )
+        return {
+            "page_id": key,
+            "url": redact_url(page.url),
+            "items": redact(rows),
+            "count": len(rows),
+            "truncated": len(rows) >= limit,
+        }
+
     def get_token_metrics(self) -> Dict[str, Any]:
         raw = self.total_raw_chars
         compact = self.total_compact_chars

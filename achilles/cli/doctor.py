@@ -2,11 +2,12 @@
 
 import asyncio
 import importlib.metadata
+import shutil
 import sys
 import time
 
 from achilles.mcp.server import MCPServer
-from achilles.services.application import ApplicationServices
+from achilles.services.application import ApplicationServices, resolve_toolsets
 
 
 async def measure_cdp_latency(cdp_port: int) -> float:
@@ -23,8 +24,14 @@ async def measure_cdp_latency(cdp_port: int) -> float:
 async def run_doctor(cdp_port: int, deep: bool) -> bool:
     """Chrome desligado é estado operacional permitido; falhas da suíte retornam False."""
     print("Achilles CDP Agent — Diagnóstico")
-    healthy = sys.version_info >= (3, 9)
+    healthy = sys.version_info >= (3, 11)
     print(f"{'OK' if healthy else 'FALHA'} Python {sys.version_info.major}.{sys.version_info.minor}")
+    executable = shutil.which("achilles")
+    if executable:
+        print(f"OK PATH: {executable}")
+    else:
+        print("FALHA PATH: 'achilles' não foi encontrado; execute install.bat e abra novo terminal")
+        healthy = False
     for package in ("playwright", "pydantic", "fastapi", "rich"):
         try:
             print(f"OK {package} {importlib.metadata.version(package)}")
@@ -34,14 +41,14 @@ async def run_doctor(cdp_port: int, deep: bool) -> bool:
 
     services = ApplicationServices(cdp_port)
     try:
-        server = MCPServer(services)
+        server = MCPServer(services, resolve_toolsets("core"))
         response = await server.handle({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18"},
         })
         tools = await server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         if response and tools and tools.get("result", {}).get("tools"):
-            print(f"OK MCP: {len(tools['result']['tools'])} ferramentas")
+            print(f"OK MCP: {len(tools['result']['tools'])} ferramentas no toolset core")
         else:
             print("FALHA MCP: handshake ou catálogo indisponível")
             healthy = False

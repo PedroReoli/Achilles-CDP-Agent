@@ -18,7 +18,9 @@ No REST, configure `ACHILLES_API_TOKEN` no ambiente ou use o token aleatório ex
 
 ## Contrato compartilhado
 
-`GET /api/tools.json` e MCP `tools/list` retornam o mesmo catálogo. Cada operação REST é `POST /api/tools/{name}`; o corpo é o objeto `arguments` da tool MCP.
+`GET /api/tools.json` e MCP `tools/list` retornam o mesmo catálogo. Cada operação REST é `POST /api/tools/{name}`; o corpo é o objeto `arguments` da tool MCP. O transporte MCP usa o toolset `core` por padrão e aceita `--tools core,network,security,memory,bookmarks` ou `--tools all`, reduzindo o contexto entregue ao agente.
+
+`browser_find` retorna apenas correspondências e referências acionáveis. `browser_extract` recebe um seletor de itens e campos CSS declarativos; não aceita JavaScript arbitrário. Para shell e agentes, `achilles call` escreve JSON em stdout, erros estruturados em stderr e usa exit code diferente de zero em falhas.
 
 | Operação principal | Argumentos |
 | --- | --- |
@@ -76,7 +78,7 @@ JWTs são decodificados, não validados criptograficamente. HS256 isolado não �
 
 ## MCP e migração
 
-O servidor stdio implementa duas eras de protocolo. A legada usa `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call` e cancelamento nas versões `2024-11-05`, `2025-06-18` e `2025-11-25`. A era `2026-07-28` usa `server/discover` ou chamada direta com versão e capacidades em `params._meta`, sem handshake; as respostas incluem `resultType` e identidade em `_meta`. A seleção de era vale para a conexão stdio, enquanto a versão moderna é conferida em cada requisição. O transporte limita mensagens a 1 MiB e concorrência a 32 requisições. Stdout contém exclusivamente JSON-RPC UTF-8. O servidor MCP é implementado no projeto para preservar Python 3.9 sem acrescentar o SDK MCP como dependência.
+O servidor stdio implementa duas eras de protocolo. A legada usa `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call` e cancelamento nas versões `2024-11-05`, `2025-06-18` e `2025-11-25`. A era `2026-07-28` usa `server/discover` ou chamada direta com versão e capacidades em `params._meta`, sem handshake; as respostas incluem `resultType` e identidade em `_meta`. A seleção de era vale para a conexão stdio, enquanto a versão moderna é conferida em cada requisição. O transporte limita mensagens a 1 MiB e concorrência a 32 requisições. Stdout contém exclusivamente JSON-RPC UTF-8.
 
 Referências: [ciclo de vida legado](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle) e [descoberta 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/server/discover.mdx).
 
@@ -95,6 +97,6 @@ python -m unittest discover tests -v
 
 Os testes de navegador iniciam Chromium descartável com porta dinâmica e um servidor HTTP local. Exercitam concorrência de conexão, substituição de nó, ação bloqueada, fill/press/select/hover/click, Shadow DOM, frames aninhados, headers reais, body redigido, seleção de abas, preservação de navegador e reconexão após reinício.
 
-O CI executa testes unitários e lint em Python 3.9 a 3.12 no Windows e Linux. Um job separado roda o teste isolado com Chromium nos dois sistemas em Python 3.12. O lint é configurado para sintaxe 3.9. Para medição local de latência e tamanho de payloads, consulte [benchmark.md](benchmark.md).
+O CI executa testes unitários e lint em Python 3.11 a 3.14 no Windows e Linux. Um job separado roda o teste isolado com Chromium nos dois sistemas em Python 3.12. O lint é configurado para sintaxe 3.11. Para medição local de latência e tamanho de payloads, consulte [benchmark.md](benchmark.md).
 
 Dez inicializações `python -m achilles --help` no ambiente 3.11: mediana 96,6 ms, máximo 104,8 ms. Isso mede a CLI Python, não o bootloader do executável PyInstaller. O binário antigo em dist não foi reconstruído por esta refatoração e ainda não incorpora os novos serviços. Compatibilidade Linux/macOS e assinatura de releases não foram homologadas neste trabalho.

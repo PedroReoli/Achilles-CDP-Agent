@@ -549,9 +549,7 @@ class AdvancedModulesV21Tests(unittest.TestCase):
             "stealth": {
                 "automation_controlled_disabled": True,
                 "navigator_webdriver_masked": True,
-                "canvas_2d_noise_active": True,
-                "webgl_vendor_spoofing_active": True,
-                "audio_buffer_jitter_active": True,
+                "native_fingerprint_preserved": True,
             },
         }
 
@@ -577,9 +575,23 @@ class AdvancedModulesV21Tests(unittest.TestCase):
     def test_advanced_tools_registered(self) -> None:
         tools = ApplicationServices.tools()["tools"]
         tool_names = {t["name"] for t in tools}
+        self.assertIn("browser_find", tool_names)
+        self.assertIn("browser_extract", tool_names)
         self.assertIn("browser_wait_for_challenge", tool_names)
         self.assertIn("browser_domain_memory", tool_names)
         self.assertIn("browser_export_html_report", tool_names)
+
+    def test_core_toolset_is_smaller_and_schema_is_specific(self) -> None:
+        from achilles.services.application import resolve_toolsets
+
+        all_tools = ApplicationServices.tools()["tools"]
+        core_tools = ApplicationServices.tools(resolve_toolsets("core"))["tools"]
+        self.assertLess(len(core_tools), len(all_tools))
+        names = {tool["name"] for tool in core_tools}
+        self.assertIn("browser_find", names)
+        self.assertNotIn("browser_bookmarks_remove", names)
+        status = next(tool for tool in core_tools if tool["name"] == "browser_status")
+        self.assertIn("required", status["outputSchema"])
 
     def test_challenge_engine_syntax(self) -> None:
         from achilles.services.challenge_engine import EVALUATE_CHALLENGE_JS
