@@ -6,6 +6,12 @@ Este arquivo registra mudanças relevantes ao usuário. O bloco abaixo reúne al
 
 ### Adicionado
 
+- Sessões nomeadas (`achilles session`) com perfis e portas CDP isolados.
+- `doctor --json`/`--fix`, eventos incrementais e endpoint SSE autenticado.
+- Ferramentas de alto nível para formulários, screenshots, uploads, downloads, diálogos e extração paginada.
+- Workflows JSON/YAML com checkpoints, retomada e exportação, além de `achilles mission`.
+- Gravação segura de operações de alto nível em workflow, com placeholders para valores privados.
+- Políticas locais read-only, allowlist/denylist de domínios e bloqueio por ferramenta.
 - CLI estruturado `achilles call`, busca focal `browser_find` e extração declarativa `browser_extract`.
 - Toolsets MCP para reduzir o catálogo padrão entregue aos agentes.
 - Reparo e validação automática do PATH nos instaladores.

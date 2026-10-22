@@ -140,6 +140,21 @@ cd Achilles-CDP-Agent
 
 `install.bat` e `install.sh` instalam o checkout como ferramenta isolada pelo `uv`, reparam o PATH quando aplicável e executam o diagnóstico. Para testes de integração, crie um ambiente de desenvolvimento com `uv sync --extra test` ou instale `.[test]` e o Chromium do Playwright.
 
+### Sessões nomeadas
+
+Cada agente pode usar um perfil e uma porta CDP isolados. A sessão marcada como ativa vira o padrão dos demais comandos, salvo quando `--cdp-port` é informado explicitamente.
+
+```powershell
+achilles session create trabalho
+achilles session start trabalho
+achilles session stop trabalho
+achilles session list
+achilles session use trabalho
+achilles session status
+```
+
+O comando `remove` apaga somente o registro; o perfil permanece preservado para recuperação manual.
+
 ---
 
 ## 🔌 Integração MCP (Claude Code, Cursor, Windsurf)
@@ -162,6 +177,11 @@ O catálogo atual inclui ferramentas para páginas, rede, relatórios, seguranç
 * `browser_snapshot`: Resume elementos interativos, frames e Shadow DOM aberto.
 * `browser_find`: Busca elementos relevantes sem devolver o snapshot inteiro ao agente.
 * `browser_extract`: Extrai listas estruturadas por seletores CSS declarativos.
+* `browser_find_and_act`: Localiza, age e tenta recuperar uma referência expirada uma vez.
+* `browser_fill_form`: Preenche vários campos em uma única chamada.
+* `browser_extract_paginated`: Paginação/infinite scroll com deduplicação e limites.
+* `browser_screenshot`, `browser_upload`, `browser_download` e `browser_handle_dialog`: Artefatos e interações completas.
+* `browser_events`: Eventos incrementais por cursor; a API também oferece SSE em `/api/events`.
 * `browser_action`: Executa cliques, preenchimentos com cadência humana, hover e teclas.
 * `browser_wait_for_challenge`: Aguarda resolução humana de CAPTCHA/2FA.
 * `browser_domain_memory`: Consulta e armazena memória de rotas por domínio.
@@ -198,12 +218,59 @@ O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela
 | `achilles memory [dominio]` | Consulta atalhos e memórias de rotas do domínio |
 | `achilles export-report` | Gera HTML standalone com timeline, estimativa de tokens, desafios e histórico HTTP da sessão ativa |
 | `achilles doctor` | Valida dependências e handshake MCP; informa separadamente se a porta CDP está fechada |
+| `achilles doctor --json --fix` | Diagnóstico estruturado e reparo seguro do PATH |
+| `achilles session create <nome>` | Cria perfil persistente e escolhe uma porta CDP livre |
+| `achilles run fluxo.yaml` | Executa workflow com checkpoint e retomada |
+| `achilles mission "objetivo" --workflow fluxo.yaml` | Executa uma missão auditável usando plano determinístico |
 | `achilles audit` | Executa auditoria passiva de segurança e headers OWASP |
 | `achilles traffic` | Exibe exchanges HTTP capturados com dados sensíveis mascarados |
 | `achilles start --port 8765` | Inicia a REST API local com autenticação Bearer |
 | `achilles mcp` | Inicia o servidor MCP via stdio |
 | `achilles call browser_status` | Executa uma ferramenta e retorna JSON estável para scripts/agentes |
 | `achilles --ai` | Exibe o protocolo autônomo com diretrizes para agentes de IA |
+
+### Workflows e Mission Runner
+
+```yaml
+name: coletar-produtos
+steps:
+  - navigate: https://example.com/products
+  - wait_for: Produtos
+  - extract_paginated:
+      items_selector: ".product"
+      fields:
+        name: {selector: ".title"}
+        price: {selector: ".price"}
+      next_query: Próxima
+      max_pages: 20
+      dedupe_by: [name]
+  - export:
+      format: jsonl
+      path: produtos.jsonl
+```
+
+```powershell
+achilles run workflow.yaml
+achilles run workflow.yaml --run-id minha-coleta --resume
+achilles mission "Coletar produtos autorizados" --workflow workflow.yaml
+```
+
+O Mission Runner não inclui um modelo próprio nem transforma linguagem natural em cliques por heurística. Um agente cria ou fornece o workflow; o Achilles executa, aplica políticas, persiste checkpoints e produz evidências.
+
+Em uma API/MCP persistente, use `browser_recording` com `start` e `stop` para gerar YAML a partir das operações de alto nível. Valores preenchidos e caminhos de upload viram placeholders como `${EMAIL}` e `${FILE_PATH}`; forneça-os na reprodução por variáveis como `ACHILLES_VAR_EMAIL`.
+
+### Política local
+
+Crie `%LOCALAPPDATA%\Achilles\policy.yaml` no Windows ou o equivalente em `$XDG_STATE_HOME`:
+
+```yaml
+read_only: false
+domains:
+  allow: ["*.example.com"]
+  deny: ["admin.example.com"]
+tools:
+  deny: [browser_bookmarks_remove]
+```
 
 ---
 
