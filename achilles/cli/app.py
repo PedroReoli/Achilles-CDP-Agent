@@ -136,6 +136,8 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_p = commands.add_parser("doctor", help="Executa testes de integridade e diagnósticos de produção")
     doctor_p.add_argument("--deep", action="store_true", help="Executa testes de estresse pesados")
     doctor_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    doctor_p.add_argument("--json", action="store_true", dest="output_json")
+    doctor_p.add_argument("--fix", action="store_true", help="Repara o PATH do usuário quando possível")
 
     # 15. Wait Challenge
     wc_p = commands.add_parser("wait-challenge", aliases=["challenge", "wait-human"], help="Aguarda resolução cooperativa de Turnstile, CAPTCHA ou 2FA")
@@ -199,6 +201,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Token da API; prefira a variável ACHILLES_API_TOKEN",
     )
 
+    session_p = commands.add_parser("session", help="Gerencia perfis e portas CDP nomeados")
+    session_actions = session_p.add_subparsers(dest="session_operation", required=True)
+    session_create = session_actions.add_parser("create", help="Cria uma sessão isolada")
+    session_create.add_argument("name")
+    session_create.add_argument("--port", type=port, default=None)
+    session_create.add_argument("--browser", choices=["chrome", "edge"], default="chrome")
+    session_actions.add_parser("list", help="Lista sessões")
+    for operation in ("start", "stop", "use", "remove"):
+        action = session_actions.add_parser(operation)
+        action.add_argument("name")
+    session_status = session_actions.add_parser("status")
+    session_status.add_argument("name", nargs="?")
+
+    run_p = commands.add_parser("run", help="Executa workflow JSON/YAML com checkpoint")
+    run_p.add_argument("workflow")
+    run_p.add_argument("--run-id", default=None)
+    run_p.add_argument("--resume", action="store_true")
+    run_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+
+    mission_p = commands.add_parser("mission", help="Registra ou executa uma missão auditável")
+    mission_p.add_argument("objective")
+    mission_p.add_argument("--workflow", default=None)
+    mission_p.add_argument("--run-id", default=None)
+    mission_p.add_argument("--resume", action="store_true")
+    mission_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+
+    setup_p = commands.add_parser("setup", help="Gera configuração MCP com caminho absoluto")
+    setup_p.add_argument("--client", choices=["claude", "cursor", "generic"], default="generic")
+    setup_p.add_argument("--output", default=None, help="Grava em arquivo novo; nunca sobrescreve")
+    setup_p.add_argument("--tools", default="core")
+
     return parser
 
 
@@ -229,6 +262,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     parser = build_parser()
     args = parser.parse_args(raw_args)
+    if hasattr(args, "cdp_port") and not any(
+        item in ("--cdp-port", "-c") for item in raw_args
+    ):
+        from achilles.services.named_sessions import NamedSessionRegistry
+
+        args.cdp_port = NamedSessionRegistry().resolve_port(None, args.cdp_port)
     if args.extension and args.command is not None:
         parser.error("--extension deve ser usado sem outro comando")
 
@@ -324,7 +363,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             asyncio.run(run_mcp_stdio(args.cdp_port, args.tools))
         elif args.command == "doctor":
             from achilles.cli.doctor import run_doctor
-            if not asyncio.run(run_doctor(args.cdp_port, args.deep)):
+            if not asyncio.run(run_doctor(args.cdp_port, args.deep, args.output_json, args.fix)):
                 raise SystemExit(1)
         elif args.command in ("wait-challenge", "challenge", "wait-human"):
             from achilles.cli.commands import run_wait_challenge
@@ -385,6 +424,35 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     token=args.token,
                 )
             )
+        elif args.command == "session":
+            from achilles.cli.sessions import run_session
+
+            run_session(
+                args.session_operation,
+                getattr(args, "name", None),
+                getattr(args, "port", None),
+                getattr(args, "browser", "chrome"),
+            )
+        elif args.command == "run":
+            from achilles.cli.workflows import run_workflow
+
+            asyncio.run(run_workflow(args.workflow, args.cdp_port, args.run_id, args.resume))
+        elif args.command == "mission":
+            from achilles.cli.workflows import run_mission
+
+            asyncio.run(
+                run_mission(
+                    args.objective,
+                    args.cdp_port,
+                    args.workflow,
+                    args.run_id,
+                    args.resume,
+                )
+            )
+        elif args.command == "setup":
+            from achilles.cli.setup import run_setup
+
+            run_setup(args.client, args.output, args.tools)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

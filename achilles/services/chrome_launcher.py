@@ -31,8 +31,8 @@ def cdp_available(port: int) -> bool:
         return False
 
 
-def chrome_binary() -> Optional[str]:
-    preferred = os.environ.get("ACHILLES_BROWSER", "chrome").lower()
+def chrome_binary(preferred: Optional[str] = None) -> Optional[str]:
+    preferred = (preferred or os.environ.get("ACHILLES_BROWSER", "chrome")).lower()
     if preferred not in ("chrome", "edge"):
         preferred = "chrome"
     if sys.platform == "win32":
@@ -66,11 +66,16 @@ def chrome_binary() -> Optional[str]:
     return next((path for path in candidates if os.path.isfile(path)), None)
 
 
-def ensure_chrome_running(port: int, timeout_s: float = 8.0) -> bool:
+def ensure_chrome_running(
+    port: int,
+    timeout_s: float = 8.0,
+    custom_profile_dir: Optional[Path] = None,
+    browser: Optional[str] = None,
+) -> bool:
     """Nunca escreve em stdout; retorna se o endpoint ficou disponível."""
     if cdp_available(port):
         return True
-    executable = chrome_binary()
+    executable = chrome_binary(browser)
     if executable is None:
         return False
     flags = 0
@@ -83,7 +88,7 @@ def ensure_chrome_running(port: int, timeout_s: float = 8.0) -> bool:
             [
                 executable,
                 f"--remote-debugging-port={port}",
-                f"--user-data-dir={profile_dir()}",
+                f"--user-data-dir={custom_profile_dir or profile_dir()}",
                 "--no-first-run",
                 "--no-default-browser-check",
                 "about:blank",
