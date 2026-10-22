@@ -2,19 +2,24 @@
 
 import asyncio
 import logging
+import re
 import time
+import uuid
 from collections import deque
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Type
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .action_resolver import ActionResolver
+from .agent_actions import AgentActions
 from .bookmarks import BookmarkService
 from .challenge_engine import ChallengeEngine
 from .domain_memory import DomainMemoryEngine
 from .errors import ServiceError
 from .observation_engine import ObservationEngine
-from .redaction import redact_url
+from .policy import PolicyEngine
+from .redaction import redact, redact_url
 from .security_engine import SecurityAuditEngine
 from .session_manager import BrowserSessionManager
 from .traffic_journal import TrafficJournal
@@ -82,6 +87,53 @@ class ExtractArguments(PageArguments):
     fields: Dict[str, ExtractField] = Field(min_length=1, max_length=50)
     limit: int = Field(100, ge=1, le=1000)
 
+class FindAndActArguments(PageArguments):
+    query: str = Field(min_length=1, max_length=512)
+    action: Literal["click", "fill", "hover", "press", "select"]
+    value: Optional[str] = Field(None, max_length=65536)
+    role: Optional[str] = Field(None, min_length=1, max_length=64)
+    timeout_ms: int = Field(5000, ge=100, le=30000)
+
+class FillFormArguments(PageArguments):
+    fields: Dict[str, str] = Field(min_length=1, max_length=100)
+    submit_query: Optional[str] = Field(None, max_length=512)
+
+class WaitStateArguments(PageArguments):
+    text: Optional[str] = Field(None, max_length=512)
+    url_contains: Optional[str] = Field(None, max_length=2048)
+    timeout_ms: int = Field(15000, ge=100, le=60000)
+
+class ScreenshotArguments(PageArguments):
+    full_page: bool = False
+    image_format: Literal["png", "jpeg"] = "png"
+
+class UploadArguments(PageArguments):
+    file_path: str = Field(min_length=1, max_length=2048)
+    query: str = Field(min_length=1, max_length=512)
+
+class DownloadArguments(PageArguments):
+    query: str = Field(min_length=1, max_length=512)
+    timeout_ms: int = Field(30000, ge=500, le=120000)
+
+class DialogArguments(PageArguments):
+    action: Literal["accept", "dismiss"]
+    prompt_text: Optional[str] = Field(None, max_length=4096)
+    timeout_ms: int = Field(15000, ge=100, le=60000)
+
+class EventsArguments(Arguments):
+    after: Optional[str] = Field(None, max_length=64)
+    limit: int = Field(50, ge=1, le=200)
+
+class PaginatedExtractArguments(ExtractArguments):
+    next_query: Optional[str] = Field(None, max_length=512)
+    max_pages: int = Field(10, ge=1, le=100)
+    max_items: int = Field(1000, ge=1, le=10000)
+    dedupe_by: Optional[List[str]] = Field(None, max_length=20)
+    scroll: bool = False
+
+class RecordingArguments(Arguments):
+    operation: Literal["start", "stop", "status"]
+    output_path: Optional[str] = Field(None, max_length=2048)
 
 class ReportArguments(PageArguments):
     pass
@@ -134,7 +186,6 @@ class BookmarkListArguments(Arguments):
     parent_id: Optional[str] = Field(None, min_length=1, max_length=128)
     limit: int = Field(100, ge=1, le=500)
 
-
 class BookmarkSearchArguments(Arguments):
     query: str = Field(min_length=1, max_length=512)
     limit: int = Field(100, ge=1, le=500)
@@ -174,6 +225,16 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "browser_read_content": ReadArguments,
     "browser_find": FindArguments,
     "browser_extract": ExtractArguments,
+    "browser_find_and_act": FindAndActArguments,
+    "browser_fill_form": FillFormArguments,
+    "browser_wait_for_state": WaitStateArguments,
+    "browser_screenshot": ScreenshotArguments,
+    "browser_upload": UploadArguments,
+    "browser_download": DownloadArguments,
+    "browser_handle_dialog": DialogArguments,
+    "browser_events": EventsArguments,
+    "browser_extract_paginated": PaginatedExtractArguments,
+    "browser_recording": RecordingArguments,
     "browser_report": ReportArguments,
     "browser_action": ActionArguments,
     "browser_wait_for_challenge": WaitForChallengeArguments,
@@ -201,6 +262,16 @@ DESCRIPTIONS = {
     "browser_read_content": "Lê o conteúdo principal da página em Markdown limpo (Reader Mode), eliminando scripts, estilos, anúncios e banners para máxima economia de tokens (~95%).",
     "browser_find": "Busca elementos por texto, papel ou dica e retorna apenas correspondências com referências acionáveis.",
     "browser_extract": "Extrai registros estruturados por seletores CSS declarativos, sem executar JavaScript arbitrário.",
+    "browser_find_and_act": "Localiza e executa uma ação, recuperando automaticamente referências inválidas uma vez.",
+    "browser_fill_form": "Preenche vários campos por nome acessível e opcionalmente envia o formulário.",
+    "browser_wait_for_state": "Aguarda texto ou mudança de URL sem polling pelo agente.",
+    "browser_screenshot": "Salva screenshot em artefato local com hash e metadados.",
+    "browser_upload": "Envia arquivo local para um input encontrado semanticamente, limitado a 50 MiB.",
+    "browser_download": "Aciona e salva um download em diretório controlado pelo Achilles.",
+    "browser_handle_dialog": "Aguarda e aceita ou dispensa alert, confirm ou prompt do navegador.",
+    "browser_events": "Retorna eventos estruturados desde um cursor, para acompanhamento incremental.",
+    "browser_extract_paginated": "Extrai múltiplas páginas ou infinite scroll com deduplicação e limites.",
+    "browser_recording": "Grava operações de alto nível em workflow YAML sem valores de formulário.",
     "browser_report": "Relatório executivo de economia de tokens e análise de rotas e tráfego de API da sessão.",
     "browser_action": "Executa Locator e retorna observação posterior; não repete a ação automaticamente.",
     "browser_wait_for_challenge": "Detecta desafios anti-bot (Turnstile, reCAPTCHA, hCaptcha, WAF) e 2FA/OTP, aguardando resolução humana cooperativa.",
@@ -230,6 +301,16 @@ TOOLSETS = {
         "browser_read_content",
         "browser_find",
         "browser_extract",
+        "browser_find_and_act",
+        "browser_fill_form",
+        "browser_wait_for_state",
+        "browser_screenshot",
+        "browser_upload",
+        "browser_download",
+        "browser_handle_dialog",
+        "browser_events",
+        "browser_extract_paginated",
+        "browser_recording",
         "browser_action",
         "browser_wait_for_challenge",
     },
@@ -265,13 +346,17 @@ class ApplicationServices:
         self.session = BrowserSessionManager(cdp_port, self.journal)
         self.observations = ObservationEngine(self.session)
         self.actions = ActionResolver(self.session, self.observations)
+        self.agent_actions = AgentActions(self.session, self.observations, self.actions)
         self.bookmarks = BookmarkService(self.session)
         self.security = SecurityAuditEngine(self.session, self.journal)
         self.challenges = ChallengeEngine(self.session)
         self.domain_memory = DomainMemoryEngine()
+        self.policy = PolicyEngine()
         self.closed = False
         self.events = deque(maxlen=200)
         self.challenge_events = deque(maxlen=50)
+        self.recording = False
+        self.recorded_steps: List[Dict[str, Any]] = []
 
     @staticmethod
     def tools(allowed_names: Optional[set] = None) -> Dict[str, Any]:
@@ -330,15 +415,31 @@ class ApplicationServices:
             "browser_navigate",
             "browser_scroll",
             "browser_action",
+            "browser_find_and_act",
+            "browser_fill_form",
+            "browser_upload",
+            "browser_download",
+            "browser_handle_dialog",
+            "browser_recording",
             "browser_domain_memory",
             "browser_export_html_report",
             "browser_bookmarks_create",
             "browser_bookmarks_update",
             "browser_bookmarks_remove",
         }
-        destructive = {"browser_action", "browser_close_tab", "browser_bookmarks_remove"}
+        destructive = {
+            "browser_action",
+            "browser_find_and_act",
+            "browser_fill_form",
+            "browser_close_tab",
+            "browser_bookmarks_remove",
+        }
         non_idempotent = {
             "browser_action",
+            "browser_find_and_act",
+            "browser_fill_form",
+            "browser_download",
+            "browser_handle_dialog",
             "browser_new_tab",
             "browser_close_tab",
             "browser_bookmarks_create",
@@ -366,16 +467,32 @@ class ApplicationServices:
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         started = time.perf_counter()
+        operation_id = uuid.uuid4().hex
         outcome = "ok"
         try:
+            current_url = ""
+            if self.policy.config.get("domains") and not arguments.get("url") and name not in (
+                "browser_status", "browser_list_pages", "browser_events",
+                "browser_recording", "browser_domain_memory",
+                "browser_bookmarks_list", "browser_bookmarks_search",
+                "browser_bookmarks_create", "browser_bookmarks_update",
+                "browser_bookmarks_remove",
+            ):
+                try:
+                    _, current_page = await self.session.page(arguments.get("page_id"))
+                    current_url = current_page.url
+                except ServiceError:
+                    pass
+            self.policy.check(name, arguments, current_url)
             result = await asyncio.wait_for(self._invoke(name, arguments), timeout=90)
         except asyncio.TimeoutError as exc:
             outcome = "timeout"
             raise ServiceError(
                 "OPERATION_TIMEOUT", "Operação excedeu o prazo; observe o estado antes de repetir."
             ) from exc
-        except ServiceError:
+        except ServiceError as exc:
             outcome = "error"
+            exc.operation_id = operation_id
             raise
         except Exception as exc:
             outcome = "error"
@@ -384,9 +501,11 @@ class ApplicationServices:
                 "INTERNAL_ERROR", "Falha interna; nenhum detalhe sensível foi retornado."
             ) from exc
         finally:
-            if name not in ("browser_report", "browser_export_html_report"):
+            if name not in ("browser_report", "browser_export_html_report", "browser_events"):
                 self.events.append({
+                    "operation_id": operation_id,
                     "at": time.time(),
+                    "type": "operation.completed" if outcome == "ok" else "operation.failed",
                     "operation": name,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                     "page_id": arguments.get("page_id"),
@@ -400,7 +519,39 @@ class ApplicationServices:
                     self.challenge_events.append({"at": time.time(), "type": warning.get("type"), "status": "detected"})
         elif name == "browser_wait_for_challenge":
             self.challenge_events.append({"at": time.time(), "type": "human_assisted", "status": result.get("status")})
+        if self.recording and outcome == "ok" and name != "browser_recording":
+            self._record_step(name, arguments)
         return result
+
+    def _record_step(self, name: str, arguments: Dict[str, Any]) -> None:
+        operations = {
+            "browser_navigate": "navigate",
+            "browser_find_and_act": "find_and_act",
+            "browser_fill_form": "fill_form",
+            "browser_extract": "extract",
+            "browser_extract_paginated": "extract_paginated",
+            "browser_screenshot": "screenshot",
+            "browser_upload": "upload",
+            "browser_download": "download",
+            "browser_wait_for_state": "wait_for",
+            "browser_wait_for_challenge": "wait_challenge",
+            "browser_handle_dialog": "dialog",
+        }
+        operation = operations.get(name)
+        if not operation:
+            return
+        safe = redact(arguments)
+        if operation == "fill_form":
+            safe["fields"] = {
+                key: "${" + (re.sub(r"[^A-Z0-9]+", "_", key.upper()).strip("_") or "INPUT") + "}"
+                for key in arguments.get("fields", {})
+            }
+        if operation == "find_and_act" and arguments.get("action") == "fill":
+            label = re.sub(r"[^A-Z0-9]+", "_", str(arguments.get("query", "VALUE")).upper()).strip("_")
+            safe["value"] = "${" + (label or "VALUE") + "}"
+        if operation == "upload" and safe.get("file_path"):
+            safe["file_path"] = "${FILE_PATH}"
+        self.recorded_steps.append({operation: safe})
 
     async def _invoke(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if name not in CONTRACTS:
@@ -441,6 +592,63 @@ class ApplicationServices:
             return await self.observations.find(**args)
         if name == "browser_extract":
             return await self.observations.extract(**args)
+        if name == "browser_find_and_act":
+            return await self.agent_actions.find_and_act(**args)
+        if name == "browser_fill_form":
+            return await self.agent_actions.fill_form(**args)
+        if name == "browser_wait_for_state":
+            return await self.agent_actions.wait_for_state(**args)
+        if name == "browser_screenshot":
+            return await self.agent_actions.screenshot(**args)
+        if name == "browser_upload":
+            return await self.agent_actions.upload(**args)
+        if name == "browser_download":
+            return await self.agent_actions.download(**args)
+        if name == "browser_handle_dialog":
+            return await self.agent_actions.handle_dialog(**args)
+        if name == "browser_events":
+            events = list(self.events)
+            if args.get("after"):
+                index = next(
+                    (i for i, event in enumerate(events) if event["operation_id"] == args["after"]),
+                    -1,
+                )
+                events = events[index + 1 :] if index >= 0 else events
+            events = events[-args["limit"] :]
+            return {"events": events, "cursor": events[-1]["operation_id"] if events else args.get("after")}
+        if name == "browser_extract_paginated":
+            return await self.agent_actions.extract_paginated(**args)
+        if name == "browser_recording":
+            operation = args["operation"]
+            if operation == "start":
+                self.recording = True
+                self.recorded_steps.clear()
+                return {"status": "recording", "steps": 0}
+            if operation == "status":
+                return {
+                    "status": "recording" if self.recording else "idle",
+                    "steps": len(self.recorded_steps),
+                }
+            import yaml
+
+            from .named_sessions import achilles_data_dir
+
+            self.recording = False
+            path = args.get("output_path") or str(
+                achilles_data_dir() / "runs" / f"recording-{uuid.uuid4().hex}.yaml"
+            )
+            destination = Path(path).expanduser().resolve()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            workflow = {"name": "recorded-workflow", "steps": self.recorded_steps}
+            destination.write_text(
+                yaml.safe_dump(workflow, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            return {
+                "status": "stopped",
+                "steps": len(self.recorded_steps),
+                "path": str(destination),
+            }
         if name == "browser_report":
             return await self.get_report(**args)
         if name == "browser_action":

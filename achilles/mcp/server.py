@@ -16,9 +16,10 @@ LEGACY_VERSIONS = ("2025-11-25", "2025-06-18", "2024-11-05")
 VERSIONS = (MODERN_VERSION,) + LEGACY_VERSIONS
 SERVER_INFO = {"name": "achilles-cdp", "version": __version__}
 SERVER_INSTRUCTIONS = (
-    "Use browser_find antes de browser_action quando não houver referência recente. "
-    "Use browser_extract para listas estruturadas. Desafios CAPTCHA e 2FA exigem "
-    "browser_wait_for_challenge e resolução humana."
+    "Prefira browser_find_and_act e browser_fill_form para reduzir round-trips. "
+    "Use browser_extract_paginated para listas extensas e browser_events para acompanhar mudanças. "
+    "Use browser_action somente com referência recente. CAPTCHA e 2FA exigem "
+    "browser_wait_for_challenge e resolução humana. Respeite sempre a política local."
 )
 VERSION_META = "io.modelcontextprotocol/protocolVersion"
 CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"

@@ -1,7 +1,9 @@
 """REST local autenticado; toda operação delega aos Application Services."""
 
+import asyncio
 import hmac
 import ipaddress
+import json
 import os
 import secrets
 import sys
@@ -9,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from achilles import __version__
@@ -127,6 +129,23 @@ def create_app(
     @app.get("/api/status")
     async def status(request: Request) -> Dict[str, Any]:
         return await request.app.state.services.call("browser_status", {})
+
+    @app.get("/api/events")
+    async def events(request: Request, after: Optional[str] = None) -> StreamingResponse:
+        async def stream() -> AsyncIterator[str]:
+            cursor = after
+            while not await request.is_disconnected():
+                result = await request.app.state.services.call(
+                    "browser_events", {"after": cursor, "limit": 100}
+                )
+                for event in result["events"]:
+                    cursor = event["operation_id"]
+                    yield "event: " + event["type"] + "\ndata: " + json.dumps(event) + "\n\n"
+                if not result["events"]:
+                    yield ": heartbeat\n\n"
+                await asyncio.sleep(1)
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.get("/api/pages")
     async def pages(request: Request) -> Dict[str, Any]:
