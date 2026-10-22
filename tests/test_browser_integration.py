@@ -213,6 +213,35 @@ class BrowserTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             self.assertEqual(extracted["items"], [{"button": "Save", "input_type": None}])
+            paginated = await app.call(
+                "browser_extract_paginated",
+                {
+                    "page_id": page_id,
+                    "items_selector": "body",
+                    "fields": {"button": {"selector": "#save"}},
+                    "max_pages": 1,
+                },
+            )
+            self.assertEqual(paginated["items"], [{"button": "Save"}])
+            form = await app.call(
+                "browser_fill_form",
+                {"page_id": page_id, "fields": {"Name": "high level"}},
+            )
+            self.assertEqual(form["fields"][0]["status"], "filled")
+            self.assertEqual(await page.locator("#name").input_value(), "high level")
+            high_level = await app.call(
+                "browser_find_and_act",
+                {"page_id": page_id, "query": "Save", "role": "button", "action": "click"},
+            )
+            self.assertEqual(high_level["status"], "executed")
+            screenshot = await app.call(
+                "browser_screenshot", {"page_id": page_id, "full_page": False}
+            )
+            self.assertGreater(screenshot["bytes"], 0)
+            Path(screenshot["path"]).unlink()
+            events = await app.call("browser_events", {"limit": 20})
+            self.assertTrue(events["events"])
+            self.assertTrue(events["cursor"])
 
             async def act(name: str, action: str, value: str = "") -> dict:
                 snap = await app.observations.snapshot(page_id)
