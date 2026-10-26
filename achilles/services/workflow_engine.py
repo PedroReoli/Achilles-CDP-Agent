@@ -27,6 +27,17 @@ STEP_TO_TOOL = {
     "download": "browser_download",
     "dialog": "browser_handle_dialog",
     "wait_challenge": "browser_wait_for_challenge",
+    "launch_app": "app_launch",
+    "attach_app": "app_attach",
+    "snapshot_app": "app_snapshot",
+    "find_app": "app_find",
+    "act_app": "app_action",
+    "find_and_act_app": "app_find_and_act",
+    "fill_app_form": "app_fill_form",
+    "wait_app": "app_wait_for_state",
+    "screenshot_app": "app_screenshot",
+    "click_app_at": "app_click_at",
+    "close_app": "app_close",
 }
 
 

@@ -1,5 +1,5 @@
 """
-Achilles CDP Agent — Autonomous Agentic Chrome DevTools Protocol (CDP) Bridge & Security/API Engine
+Achilles — Browser CDP and Windows UI Automation runtime for local AI agents
 """
 import os
 import sys

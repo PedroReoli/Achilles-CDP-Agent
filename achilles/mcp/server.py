@@ -1,9 +1,11 @@
 """MCP stdio JSON-RPC enxuto e compatível com clientes legados e modernos."""
 
 import asyncio
+import base64
 import copy
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from achilles import __version__
@@ -17,6 +19,8 @@ VERSIONS = (MODERN_VERSION,) + LEGACY_VERSIONS
 SERVER_INFO = {"name": "achilles-cdp", "version": __version__}
 SERVER_INSTRUCTIONS = (
     "Prefira browser_find_and_act e browser_fill_form para reduzir round-trips. "
+    "Para aplicativos Windows use app_list, app_attach, app_snapshot e app_find_and_act; "
+    "reserve app_click_at para interfaces sem acessibilidade e somente após screenshot recente. "
     "Use browser_extract_paginated para listas extensas e browser_events para acompanhar mudanças. "
     "Use browser_action somente com referência recente. CAPTCHA e 2FA exigem "
     "browser_wait_for_challenge e resolução humana. Respeite sempre a política local."
@@ -25,6 +29,29 @@ VERSION_META = "io.modelcontextprotocol/protocolVersion"
 CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
 SERVER_INFO_META = "io.modelcontextprotocol/serverInfo"
 MAX_MESSAGE_BYTES = 1048576
+MAX_INLINE_IMAGE_BYTES = 600000
+
+
+def tool_content(name: str, data: Dict[str, Any], text_payload: Dict[str, Any]) -> list:
+    content = [{"type": "text", "text": json.dumps(text_payload, ensure_ascii=False)}]
+    if name not in ("app_screenshot", "browser_screenshot"):
+        return content
+    path = Path(str(data.get("path", "")))
+    try:
+        if not path.is_file() or path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+            content[0]["text"] = json.dumps(
+                {**text_payload, "image_inline": False}, ensure_ascii=False
+            )
+            return content
+        mime_type = "image/jpeg" if path.suffix.casefold() in (".jpg", ".jpeg") else "image/png"
+        content.append({
+            "type": "image",
+            "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+            "mimeType": mime_type,
+        })
+        return content
+    except OSError:
+        return content
 
 
 def encode_response(response: Dict[str, Any]) -> bytes:
@@ -176,10 +203,7 @@ class MCPServer:
                             for key in ("page_id", "url", "title", "markdown", "tokens_saved_percent")
                             if key in data
                         }
-                    result = {
-                        "content": [{"type": "text", "text": json.dumps(text_payload, ensure_ascii=False)}],
-                        "isError": False,
-                    }
+                    result = {"content": tool_content(name, data, text_payload), "isError": False}
                     if modern or self.version != "2024-11-05":
                         result["structuredContent"] = data
                 except ServiceError as exc:
@@ -200,7 +224,7 @@ class MCPServer:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-async def run_mcp_stdio(cdp_port: int = 9222, toolsets: str = "core") -> None:
+async def run_mcp_stdio(cdp_port: int = 9222, toolsets: str = "core,desktop") -> None:
     services = ApplicationServices(cdp_port)
     server = MCPServer(services, resolve_toolsets(toolsets))
     pending: Dict[RequestId, asyncio.Task[Any]] = {}

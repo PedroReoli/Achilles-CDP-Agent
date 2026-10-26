@@ -128,8 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     mcp_p.add_argument(
         "--tools",
-        default="core",
-        help="Toolsets separados por vírgula: core,network,security,memory,bookmarks ou all",
+        default="core,desktop",
+        help="Toolsets: core,desktop,network,security,memory,bookmarks ou all",
     )
 
     # 14. Doctor
@@ -230,7 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_p = commands.add_parser("setup", help="Gera configuração MCP com caminho absoluto")
     setup_p.add_argument("--client", choices=["claude", "cursor", "generic"], default="generic")
     setup_p.add_argument("--output", default=None, help="Grava em arquivo novo; nunca sobrescreve")
-    setup_p.add_argument("--tools", default="core")
+    setup_p.add_argument("--tools", default="core,desktop")
 
     return parser
 

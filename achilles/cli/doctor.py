@@ -78,7 +78,10 @@ async def run_doctor(
             repairs.append({"component": "PATH", **repair_user_path()})
         except (OSError, PermissionError) as exc:
             repairs.append({"component": "PATH", "changed": False, "error": type(exc).__name__})
-    for package in ("playwright", "pydantic", "fastapi", "rich"):
+    packages = ["playwright", "pydantic", "fastapi", "rich"]
+    if os.name == "nt":
+        packages.append("pywinauto")
+    for package in packages:
         try:
             report("OK", package, importlib.metadata.version(package))
         except importlib.metadata.PackageNotFoundError:
@@ -87,14 +90,14 @@ async def run_doctor(
 
     services = ApplicationServices(cdp_port)
     try:
-        server = MCPServer(services, resolve_toolsets("core"))
+        server = MCPServer(services, resolve_toolsets("core,desktop"))
         response = await server.handle({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18"},
         })
         tools = await server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         if response and tools and tools.get("result", {}).get("tools"):
-            report("OK", "MCP", f"{len(tools['result']['tools'])} ferramentas no toolset core")
+            report("OK", "MCP", f"{len(tools['result']['tools'])} ferramentas core+desktop")
         else:
             report("FALHA", "MCP", "handshake ou catálogo indisponível")
             healthy = False
@@ -111,6 +114,9 @@ async def run_doctor(
                     report("FALHA", "CDP pages", type(exc).__name__)
                     healthy = False
         report("INFO", "Processos", "nenhum processo foi iniciado ou encerrado")
+        if os.name == "nt":
+            desktop = await services.call("app_status", {})
+            report("OK", "Desktop", f"backend {desktop['backend']} disponível")
     finally:
         await services.close()
     if output_json:
