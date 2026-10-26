@@ -103,7 +103,7 @@ jobs:
         run: python scripts/benchmark.py --samples 5 --elements 50 --output benchmark.json
 
       - name: Upload benchmark result
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-${{ matrix.os }}
           path: benchmark.json
