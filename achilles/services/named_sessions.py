@@ -12,7 +12,10 @@ from .errors import ServiceError
 
 
 def achilles_data_dir() -> Path:
-    if os.name == "nt":
+    configured = os.environ.get("ACHILLES_DATA_DIR")
+    if configured:
+        root = Path(configured).expanduser().resolve()
+    elif os.name == "nt":
         root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Achilles"
     else:
         root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "achilles"

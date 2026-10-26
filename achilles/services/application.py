@@ -15,6 +15,8 @@ from .action_resolver import ActionResolver
 from .agent_actions import AgentActions
 from .bookmarks import BookmarkService
 from .challenge_engine import ChallengeEngine
+from .desktop_contracts import DESKTOP_CONTRACTS, DESKTOP_DESCRIPTIONS, DESKTOP_TOOLSET
+from .desktop_service import DesktopService
 from .domain_memory import DomainMemoryEngine
 from .errors import ServiceError
 from .observation_engine import ObservationEngine
@@ -22,6 +24,7 @@ from .policy import PolicyEngine
 from .redaction import redact, redact_url
 from .security_engine import SecurityAuditEngine
 from .session_manager import BrowserSessionManager
+from .tool_catalog import build_tool_catalog
 from .traffic_journal import TrafficJournal
 from .visual_report import export_report_to_file, generate_html_report
 
@@ -250,6 +253,7 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "network_postman": Arguments,
     "security_audit": PageArguments,
 }
+CONTRACTS.update(DESKTOP_CONTRACTS)
 DESCRIPTIONS = {
     "browser_status": "Estado do transporte e da captura, sem conectar automaticamente.",
     "browser_list_pages": "Lista abas e frames disponíveis no navegador CDP conectado.",
@@ -287,6 +291,7 @@ DESCRIPTIONS = {
     "network_postman": "Coleção Postman 2.1 com credenciais redigidas.",
     "security_audit": "Auditoria passiva com evidência e cobertura ausente explícitas.",
 }
+DESCRIPTIONS.update(DESKTOP_DESCRIPTIONS)
 
 TOOLSETS = {
     "core": {
@@ -324,6 +329,7 @@ TOOLSETS = {
         "browser_bookmarks_update",
         "browser_bookmarks_remove",
     },
+    "desktop": DESKTOP_TOOLSET,
 }
 
 
@@ -352,6 +358,7 @@ class ApplicationServices:
         self.challenges = ChallengeEngine(self.session)
         self.domain_memory = DomainMemoryEngine()
         self.policy = PolicyEngine()
+        self.desktop = DesktopService(self.policy)
         self.closed = False
         self.events = deque(maxlen=200)
         self.challenge_events = deque(maxlen=50)
@@ -360,110 +367,7 @@ class ApplicationServices:
 
     @staticmethod
     def tools(allowed_names: Optional[set] = None) -> Dict[str, Any]:
-        output_schemas = {
-            "browser_status": {
-                "type": "object",
-                "properties": {
-                    "cdp_url": {"type": "string"},
-                    "mode": {"type": "string"},
-                    "generation": {"type": "integer"},
-                    "recorded_requests": {"type": "integer"},
-                    "dropped_events": {"type": "integer"},
-                },
-                "required": ["cdp_url", "mode", "generation", "recorded_requests"],
-            },
-            "browser_find": {
-                "type": "object",
-                "properties": {
-                    "page_id": {"type": "string"},
-                    "snapshot_id": {"type": "string"},
-                    "query": {"type": "string"},
-                    "matches": {"type": "array", "items": {"type": "object"}},
-                    "match_count": {"type": "integer"},
-                    "truncated": {"type": "boolean"},
-                },
-                "required": ["page_id", "snapshot_id", "query", "matches", "match_count"],
-            },
-            "browser_extract": {
-                "type": "object",
-                "properties": {
-                    "page_id": {"type": "string"},
-                    "url": {"type": "string"},
-                    "items": {"type": "array", "items": {"type": "object"}},
-                    "count": {"type": "integer"},
-                    "truncated": {"type": "boolean"},
-                },
-                "required": ["page_id", "url", "items", "count", "truncated"],
-            },
-            "browser_action": {
-                "type": "object",
-                "properties": {
-                    "status": {"type": "string"},
-                    "action": {"type": "string"},
-                    "page_id": {"type": "string"},
-                    "url_after": {"type": "string"},
-                    "duration_ms": {"type": "number"},
-                    "verification": {"type": "object"},
-                },
-                "required": ["status", "action", "page_id", "duration_ms", "verification"],
-            },
-        }
-        mutating = {
-            "browser_select_page",
-            "browser_new_tab",
-            "browser_close_tab",
-            "browser_navigate",
-            "browser_scroll",
-            "browser_action",
-            "browser_find_and_act",
-            "browser_fill_form",
-            "browser_upload",
-            "browser_download",
-            "browser_handle_dialog",
-            "browser_recording",
-            "browser_domain_memory",
-            "browser_export_html_report",
-            "browser_bookmarks_create",
-            "browser_bookmarks_update",
-            "browser_bookmarks_remove",
-        }
-        destructive = {
-            "browser_action",
-            "browser_find_and_act",
-            "browser_fill_form",
-            "browser_close_tab",
-            "browser_bookmarks_remove",
-        }
-        non_idempotent = {
-            "browser_action",
-            "browser_find_and_act",
-            "browser_fill_form",
-            "browser_download",
-            "browser_handle_dialog",
-            "browser_new_tab",
-            "browser_close_tab",
-            "browser_bookmarks_create",
-            "browser_bookmarks_remove",
-        }
-        tools = []
-        for name, contract in CONTRACTS.items():
-            if allowed_names is not None and name not in allowed_names:
-                continue
-            tool = {
-                "name": name,
-                "description": DESCRIPTIONS[name],
-                "inputSchema": contract.model_json_schema(),
-                "annotations": {
-                    "readOnlyHint": name not in mutating,
-                    "destructiveHint": name in destructive,
-                    "idempotentHint": name not in non_idempotent,
-                    "openWorldHint": name.startswith(("browser_", "network_")),
-                },
-            }
-            if name in output_schemas:
-                tool["outputSchema"] = output_schemas[name]
-            tools.append(tool)
-        return {"tools": tools}
+        return build_tool_catalog(CONTRACTS, DESCRIPTIONS, allowed_names)
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         started = time.perf_counter()
@@ -471,13 +375,14 @@ class ApplicationServices:
         outcome = "ok"
         try:
             current_url = ""
-            if self.policy.config.get("domains") and not arguments.get("url") and name not in (
+            if (self.policy.config.get("domains") and not name.startswith("app_")
+                    and not arguments.get("url") and name not in (
                 "browser_status", "browser_list_pages", "browser_events",
                 "browser_recording", "browser_domain_memory",
                 "browser_bookmarks_list", "browser_bookmarks_search",
                 "browser_bookmarks_create", "browser_bookmarks_update",
                 "browser_bookmarks_remove",
-            ):
+            )):
                 try:
                     _, current_page = await self.session.page(arguments.get("page_id"))
                     current_url = current_page.url
@@ -509,6 +414,7 @@ class ApplicationServices:
                     "operation": name,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 1),
                     "page_id": arguments.get("page_id"),
+                    "window_handle": arguments.get("window_handle"),
                     "status": outcome,
                 })
         if name == "browser_navigate" and self.events:
@@ -536,12 +442,20 @@ class ApplicationServices:
             "browser_wait_for_state": "wait_for",
             "browser_wait_for_challenge": "wait_challenge",
             "browser_handle_dialog": "dialog",
+            "app_launch": "launch_app",
+            "app_attach": "attach_app",
+            "app_find_and_act": "find_and_act_app",
+            "app_fill_form": "fill_app_form",
+            "app_wait_for_state": "wait_app",
+            "app_screenshot": "screenshot_app",
+            "app_click_at": "click_app_at",
+            "app_close": "close_app",
         }
         operation = operations.get(name)
         if not operation:
             return
         safe = redact(arguments)
-        if operation == "fill_form":
+        if operation in ("fill_form", "fill_app_form"):
             safe["fields"] = {
                 key: "${" + (re.sub(r"[^A-Z0-9]+", "_", key.upper()).strip("_") or "INPUT") + "}"
                 for key in arguments.get("fields", {})
@@ -551,6 +465,8 @@ class ApplicationServices:
             safe["value"] = "${" + (label or "VALUE") + "}"
         if operation == "upload" and safe.get("file_path"):
             safe["file_path"] = "${FILE_PATH}"
+        if operation == "launch_app" and safe.get("arguments"):
+            safe["arguments"] = ["${APP_ARGUMENTS}"]
         self.recorded_steps.append({operation: safe})
 
     async def _invoke(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -564,6 +480,8 @@ class ApplicationServices:
             raise ServiceError(
                 "INVALID_ARGUMENT", "Argumentos não correspondem ao inputSchema."
             ) from exc
+        if name.startswith("app_"):
+            return await self.desktop.call(name, args)
         if name == "browser_status":
             return {
                 "cdp_url": self.session.cdp_url,
@@ -744,6 +662,7 @@ class ApplicationServices:
         }
 
     async def close(self) -> None:
+        await self.desktop.close()
         await self.observations.close()
         await self.session.close()
         self.journal.clear()

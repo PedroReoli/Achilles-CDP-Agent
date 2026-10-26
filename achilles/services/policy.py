@@ -26,7 +26,22 @@ MUTATING_TOOLS = {
     "browser_bookmarks_create",
     "browser_bookmarks_update",
     "browser_bookmarks_remove",
+    "app_launch",
+    "app_attach",
+    "app_action",
+    "app_find_and_act",
+    "app_fill_form",
+    "app_click_at",
+    "app_close",
 }
+
+DEFAULT_PROTECTED_APPS = [
+    "consent.exe",
+    "credentialuibroker.exe",
+    "lsass.exe",
+    "logonui.exe",
+    "winlogon.exe",
+]
 
 
 class PolicyEngine:
@@ -66,3 +81,30 @@ class PolicyEngine:
             raise ServiceError("DOMAIN_DENIED", f"A política bloqueia o domínio {host}.")
         if allowed_domains and not self._matches(host, allowed_domains):
             raise ServiceError("DOMAIN_DENIED", f"O domínio {host} não está na allowlist.")
+
+    def check_desktop(self, tool: str, executable: str, title: str) -> None:
+        """Aplica política ao alvo real depois que PID/handle foram resolvidos."""
+        desktop = self.config.get("desktop", {})
+        if not isinstance(desktop, dict):
+            raise ServiceError("POLICY_INVALID", "desktop precisa ser um objeto YAML.")
+        if desktop.get("read_only") and tool in MUTATING_TOOLS:
+            raise ServiceError("POLICY_DENIED", "A política de desktop está em modo somente leitura.")
+        if tool == "app_click_at" and desktop.get("allow_coordinate_actions", True) is False:
+            raise ServiceError("POLICY_DENIED", "A política bloqueia ações por coordenada.")
+        if tool == "app_launch" and desktop.get("allow_launch", True) is False:
+            raise ServiceError("POLICY_DENIED", "A política bloqueia abertura de aplicativos.")
+        if tool == "app_close" and desktop.get("allow_close", True) is False:
+            raise ServiceError("POLICY_DENIED", "A política bloqueia fechamento de janelas.")
+        candidate = executable.casefold()
+        basename = Path(candidate).name
+        denied = desktop.get("deny_apps", DEFAULT_PROTECTED_APPS)
+        allowed = desktop.get("allow_apps", [])
+        if not isinstance(denied, list) or not isinstance(allowed, list):
+            raise ServiceError("POLICY_INVALID", "allow_apps e deny_apps precisam ser listas.")
+        if self._matches(candidate, denied) or self._matches(basename, denied):
+            raise ServiceError("APP_DENIED", f"A política bloqueia o aplicativo {basename}.")
+        if allowed and not (self._matches(candidate, allowed) or self._matches(basename, allowed)):
+            raise ServiceError("APP_DENIED", f"O aplicativo {basename} não está na allowlist.")
+        denied_titles = desktop.get("deny_window_titles", [])
+        if denied_titles and self._matches(title, denied_titles):
+            raise ServiceError("APP_DENIED", "A política bloqueia esta janela.")
