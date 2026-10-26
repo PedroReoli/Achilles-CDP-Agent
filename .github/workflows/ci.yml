@@ -93,6 +93,12 @@ jobs:
           ACHILLES_BROWSER_TESTS: "1"
         run: python -m unittest discover -s tests -p test_browser_integration.py -v
 
+      - name: Run isolated Windows desktop integration
+        if: runner.os == 'Windows'
+        env:
+          ACHILLES_DESKTOP_TESTS: "1"
+        run: python -m unittest tests.test_desktop.DesktopIntegrationTests -v
+
       - name: Run reproducible performance smoke benchmark
         run: python scripts/benchmark.py --samples 5 --elements 50 --output benchmark.json
 
