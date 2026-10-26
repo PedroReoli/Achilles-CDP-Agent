@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <strong>Automação e observação de Chrome e Edge para agentes locais.</strong><br>
-  <em>CLI • MCP stdio • REST local • Reader Mode • relatórios de sessão</em>
+  <strong>Automação de navegador e aplicativos Windows para agentes locais.</strong><br>
+  <em>Chrome/Edge CDP • Windows UI Automation • MCP • CLI • REST local</em>
 </p>
 
 <p align="center">
@@ -26,9 +26,11 @@
 
 ## 💡 O que é o Achilles?
 
-O **Achilles CDP Agent** conecta agentes locais a uma sessão de Chrome, Chromium ou Edge exposta pelo **Chrome DevTools Protocol (CDP)**. CLI, servidor MCP stdio e REST local compartilham o mesmo catálogo de operações.
+O **Achilles CDP Agent** conecta agentes locais ao Chrome/Edge por **Chrome DevTools Protocol (CDP)** e, no Windows, aos aplicativos da sessão interativa por **Windows UI Automation (UIA)**. CLI, servidor MCP stdio e REST local compartilham o mesmo catálogo de operações.
 
 O motor usa Playwright conectado por CDP para ações em páginas e chamadas CDP diretas para parte da observação. Pode iniciar um perfil persistente próprio se a porta estiver fechada. Navegação, login e resolução de desafios podem ocorrer com intervenção humana. Favoritos exigem uma extensão instalada no perfil controlado. O projeto preserva o fingerprint nativo do navegador em vez de fabricar hardware, Canvas, WebGL ou áudio.
+
+O runtime Windows opera em um worker isolado, usa nomes/papéis acessíveis antes de recorrer a coordenadas e exige screenshot recente para o fallback visual. UAC, logon, credenciais, DRM e outros desktops protegidos permanecem fora do escopo.
 
 ---
 
@@ -65,6 +67,13 @@ O motor usa Playwright conectado por CDP para ações em páginas e chamadas CDP
 ### 8. ⭐ Favoritos do navegador
 * Lista, busca, cria, edita e remove favoritos pelo `chrome.bookmarks` em uma extensão mínima para Chrome/Edge. Veja o [guia de instalação](.docs/browser-bookmarks.md).
 
+### 9. 🖥️ Aplicativos Windows
+* Descobre, abre e seleciona aplicativos e janelas da sessão interativa.
+* Captura árvores UIA versionadas, busca controles e executa ações semânticas.
+* Preenche formulários, aguarda estados e captura somente a janela selecionada.
+* Interfaces sem acessibilidade podem usar clique visual relativo a um screenshot recente.
+* O worker UIA é separado do processo MCP e respeita `policy.yaml`. Veja o [guia de desktop](.docs/windows-desktop.md).
+
 ---
 
 ## 🏗️ Arquitetura do Sistema
@@ -89,6 +98,7 @@ graph TD
         Stealth["Browser Hardening com fingerprint nativo"]
         Redact["Redação de dados sensíveis"]
         Bookmarks["Favoritos"]
+        Desktop["Desktop Service"]
     end
 
     subgraph ChromeRuntime ["Chrome / Edge (perfil conectado)"]
@@ -96,6 +106,12 @@ graph TD
         Extension["Extensão de favoritos (opcional)"]
         HUD["HUD nativo (Windows, opcional)"]
         Pages["Abas, Frames & Sessões Ativas"]
+    end
+
+    subgraph WindowsRuntime ["Windows Desktop Runtime"]
+        Worker["Worker UIA isolado"]
+        Apps["Apps e janelas"]
+        Vision["Screenshot + fallback visual"]
     end
 
     AI --> CLI
@@ -111,10 +127,14 @@ graph TD
     AppSvc --> Stealth
     AppSvc --> Redact
     AppSvc --> Bookmarks
+    AppSvc --> Desktop
     AppSvc --> CDP
     AppSvc --> HUD
     CDP --> Pages
     Bookmarks --> Extension
+    Desktop --> Worker
+    Worker --> Apps
+    Worker --> Vision
     User -.->|Interage no navegador / 2FA| Pages
 ```
 
@@ -122,7 +142,7 @@ graph TD
 
 ## 🚀 Instalação Rápida
 
-Requer Python 3.11+, `uv` e Chrome, Chromium ou Edge. O Achilles tenta iniciar Chrome quando a porta CDP está fechada; `ACHILLES_BROWSER=edge` seleciona Edge. O perfil iniciado automaticamente é separado do perfil pessoal. Para usar favoritos, instale a [extensão no perfil conectado](.docs/browser-bookmarks.md).
+Requer Python 3.11+ e `uv`. Chrome, Chromium ou Edge são necessários apenas para automação web. No Windows, `pywinauto`, COM e Pillow são instalados automaticamente para o runtime de desktop.
 
 ### Windows (PowerShell)
 ```powershell
@@ -166,7 +186,7 @@ Adicione o Achilles no arquivo de configuração do seu cliente MCP (`claude_des
   "mcpServers": {
     "achilles": {
       "command": "achilles",
-      "args": ["mcp", "--cdp-port", "9222", "--tools", "core"]
+      "args": ["mcp", "--cdp-port", "9222", "--tools", "core,desktop"]
     }
   }
 }
@@ -188,6 +208,11 @@ O catálogo atual inclui ferramentas para páginas, rede, relatórios, seguranç
 * `browser_export_html_report`: Exporta relatório da sessão em HTML.
 * `browser_bookmarks_*`: Lista, busca, cria, edita e remove favoritos do perfil conectado.
 * `security_audit`: Auditoria de postura passiva e cabeçalhos OWASP.
+* `app_list`, `app_launch` e `app_attach`: Descoberta, abertura e seleção de aplicativos Windows.
+* `app_snapshot`, `app_find` e `app_action`: Árvore UIA versionada e ações semânticas.
+* `app_find_and_act` e `app_fill_form`: Operações compostas com menos round-trips.
+* `app_screenshot` e `app_click_at`: Fallback visual protegido por screenshot recente.
+* `app_wait_for_state` e `app_close`: Sincronização e fechamento gracioso, sem matar processos.
 
 O servidor MCP usa stdio e mantém o stdout reservado a JSON-RPC. `browser_status` e `tools/list` não iniciam o navegador; ferramentas que precisam dele tentam conectar ou iniciar o perfil configurado. Respostas extensas são limitadas como JSON válido. Veja [contratos, versões e limites](.docs/application-services.md).
 
@@ -227,6 +252,8 @@ O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela
 | `achilles start --port 8765` | Inicia a REST API local com autenticação Bearer |
 | `achilles mcp` | Inicia o servidor MCP via stdio |
 | `achilles call browser_status` | Executa uma ferramenta e retorna JSON estável para scripts/agentes |
+| `achilles call app_list -a '{"limit":20}'` | Lista aplicativos Windows acessíveis por UIA |
+| `achilles call app_status` | Valida o worker de desktop isolado |
 | `achilles --ai` | Exibe o protocolo autônomo com diretrizes para agentes de IA |
 
 ### Workflows e Mission Runner
@@ -249,6 +276,8 @@ steps:
       path: produtos.jsonl
 ```
 
+Aplicativos Windows usam as operações `launch_app`, `attach_app`, `snapshot_app`, `find_app`, `act_app`, `find_and_act_app`, `fill_app_form`, `wait_app`, `screenshot_app`, `click_app_at` e `close_app` no mesmo Mission Runner.
+
 ```powershell
 achilles run workflow.yaml
 achilles run workflow.yaml --run-id minha-coleta --resume
@@ -270,6 +299,9 @@ domains:
   deny: ["admin.example.com"]
 tools:
   deny: [browser_bookmarks_remove]
+desktop:
+  deny_apps: [credentialuibroker.exe]
+  allow_coordinate_actions: false
 ```
 
 ---
@@ -288,6 +320,10 @@ python -m playwright install chromium
 # Executa testes de integração com perfil descartável
 $env:ACHILLES_BROWSER_TESTS = '1'
 python -m unittest discover -s tests -p test_browser_integration.py -v
+
+# Executa o teste UIA contra uma janela WinForms descartável
+$env:ACHILLES_DESKTOP_TESTS = '1'
+python -m unittest tests.test_desktop.DesktopIntegrationTests -v
 
 # Executa o benchmark local e grava JSON reproduzível
 python scripts/benchmark.py --samples 20 --elements 50 --output benchmark.json

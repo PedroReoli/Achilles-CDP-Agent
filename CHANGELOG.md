@@ -15,6 +15,9 @@ Este arquivo registra mudanças relevantes ao usuário. O bloco abaixo reúne al
 - CLI estruturado `achilles call`, busca focal `browser_find` e extração declarativa `browser_extract`.
 - Toolsets MCP para reduzir o catálogo padrão entregue aos agentes.
 - Reparo e validação automática do PATH nos instaladores.
+- Toolset `desktop` para abrir, anexar, observar e controlar aplicativos Windows por UI Automation.
+- Worker UIA isolado, formulários de desktop, espera de estado e fallback visual por screenshot recente.
+- Políticas allow/deny por executável e título, com bloqueio de superfícies protegidas do Windows.
 
 - `achilles --extension` prepara a extensão de favoritos para instalação manual e notifica o usuário no Windows.
 - Ferramentas CLI, MCP e REST para listar, buscar, criar, editar e remover favoritos de Chrome/Edge por extensão com permissão `bookmarks`.

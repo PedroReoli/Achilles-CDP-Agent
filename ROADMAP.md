@@ -10,13 +10,18 @@
 - Workflows JSON/YAML com checkpoints, retomada, CSV/JSON/JSONL e Mission Runner.
 - Políticas locais de ferramenta, modo read-only e allow/deny de domínios.
 - Benchmark reproduzível publicado como artefato do CI.
+- Runtime Windows UI Automation em processo isolado para abrir, observar e controlar aplicativos.
+- Fallback visual com screenshot recente, ações relativas e proteção contra estado obsoleto.
+- Política desktop por aplicativo/janela e bloqueio de superfícies de credenciais e logon.
 
 ## Próximo
 
-- Gravação visual de fluxos manuais para gerar workflows.
+- OCR local opcional para enriquecer interfaces sem árvore de acessibilidade.
 - Adaptadores oficiais de configuração para mais clientes MCP.
 - Dashboard histórico de benchmark entre releases.
 
 ## Limites
 
 Achilles detecta CAPTCHA, WAF e 2FA e transfere o controle para uma pessoa. Evasão desses controles não faz parte do projeto.
+
+No desktop, UAC, logon, DRM, anti-cheat e processos com privilégio superior não são prometidos como automatizáveis.
