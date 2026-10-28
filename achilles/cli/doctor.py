@@ -90,14 +90,14 @@ async def run_doctor(
 
     services = ApplicationServices(cdp_port)
     try:
-        server = MCPServer(services, resolve_toolsets("core,desktop"))
+        server = MCPServer(services, resolve_toolsets("core,desktop,qa"))
         response = await server.handle({
             "jsonrpc": "2.0", "id": 1, "method": "initialize",
             "params": {"protocolVersion": "2025-06-18"},
         })
         tools = await server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         if response and tools and tools.get("result", {}).get("tools"):
-            report("OK", "MCP", f"{len(tools['result']['tools'])} ferramentas core+desktop")
+            report("OK", "MCP", f"{len(tools['result']['tools'])} ferramentas core+desktop+qa")
         else:
             report("FALHA", "MCP", "handshake ou catálogo indisponível")
             healthy = False
@@ -117,6 +117,8 @@ async def run_doctor(
         if os.name == "nt":
             desktop = await services.call("app_status", {})
             report("OK", "Desktop", f"backend {desktop['backend']} disponível")
+        qa = await services.call("qa_status", {})
+        report("OK", "QA", f"engine {qa['engine']} e Studio disponíveis")
     finally:
         await services.close()
     if output_json:

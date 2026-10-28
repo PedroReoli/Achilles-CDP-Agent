@@ -123,13 +123,19 @@ def build_parser() -> argparse.ArgumentParser:
     start_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     start_p.add_argument("--host", choices=["127.0.0.1"], default="127.0.0.1")
 
+    studio_p = commands.add_parser("studio", help="Inicia o Achilles QA Studio local")
+    studio_p.add_argument("--port", "-p", type=port, default=8766)
+    studio_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    studio_p.add_argument("--host", choices=["127.0.0.1"], default="127.0.0.1")
+    studio_p.add_argument("--no-open", action="store_true", help="Não abre o navegador")
+
     # 13. MCP stdio
     mcp_p = commands.add_parser("mcp", help="Inicia MCP via stdio")
     mcp_p.add_argument("--cdp-port", "-c", type=port, default=9222)
     mcp_p.add_argument(
         "--tools",
-        default="core,desktop",
-        help="Toolsets: core,desktop,network,security,memory,bookmarks ou all",
+        default="core,desktop,qa",
+        help="Toolsets: core,desktop,qa,network,security,memory,bookmarks ou all",
     )
 
     # 14. Doctor
@@ -230,7 +236,34 @@ def build_parser() -> argparse.ArgumentParser:
     setup_p = commands.add_parser("setup", help="Gera configuração MCP com caminho absoluto")
     setup_p.add_argument("--client", choices=["claude", "cursor", "generic"], default="generic")
     setup_p.add_argument("--output", default=None, help="Grava em arquivo novo; nunca sobrescreve")
-    setup_p.add_argument("--tools", default="core,desktop")
+    setup_p.add_argument("--tools", default="core,desktop,qa")
+
+    qa_p = commands.add_parser("qa", help="Descobre, testa e audita endpoints HTTP")
+    qa_p.add_argument("--cdp-port", "-c", type=port, default=9222)
+    qa_actions = qa_p.add_subparsers(dest="qa_operation", required=True)
+    qa_discover = qa_actions.add_parser("discover", help="Descobre endpoints por tráfego/OpenAPI")
+    qa_discover.add_argument("--openapi", default=None)
+    qa_discover.add_argument("--base-url", default=None)
+    qa_discover.add_argument("--no-traffic", action="store_false", dest="include_traffic")
+    qa_discover.add_argument("--limit", type=int, default=200)
+    qa_request = qa_actions.add_parser("request", help="Executa um caso HTTP com assertions")
+    qa_request.add_argument("url")
+    qa_request.add_argument("--method", choices=["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"], default="GET")
+    qa_request.add_argument("--expect-status", type=int, action="append", dest="expected_status", default=None)
+    qa_request.add_argument("--timeout-ms", type=int, default=10000)
+    qa_request.add_argument("--allow-mutating", action="store_true")
+    qa_run = qa_actions.add_parser("run", help="Executa suíte QA JSON/YAML")
+    qa_run.add_argument("path")
+    qa_report = qa_actions.add_parser("report", help="Lê ou exporta relatório QA")
+    qa_report.add_argument("run_id", nargs="?", default=None)
+    qa_report.add_argument("--format", choices=["json", "html", "junit"], default="json")
+    qa_report.add_argument("--output", dest="output_path", default=None)
+    qa_audit = qa_actions.add_parser("audit", help="Auditoria defensiva de endpoints")
+    qa_audit.add_argument("urls", nargs="*")
+    qa_audit.add_argument("--no-traffic", action="store_false", dest="include_traffic")
+    qa_audit.add_argument("--timeout-ms", type=int, default=10000)
+    qa_runs = qa_actions.add_parser("runs", help="Lista execuções QA")
+    qa_runs.add_argument("--limit", type=int, default=20)
 
     return parser
 
@@ -358,6 +391,26 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 log_level="warning",
                 limit_concurrency=32,
             )
+        elif args.command == "studio":
+            import threading
+            import webbrowser
+
+            import uvicorn
+
+            from achilles.studio.server import create_studio_app
+
+            url = f"http://{args.host}:{args.port}"
+            if not args.no_open:
+                threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+            print(f"Achilles QA Studio: {url}", file=sys.stderr)
+            uvicorn.run(
+                create_studio_app(args.cdp_port),
+                host=args.host,
+                port=args.port,
+                proxy_headers=False,
+                log_level="warning",
+                limit_concurrency=32,
+            )
         elif args.command == "mcp":
             from achilles.mcp.server import run_mcp_stdio
             asyncio.run(run_mcp_stdio(args.cdp_port, args.tools))
@@ -453,6 +506,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             from achilles.cli.setup import run_setup
 
             run_setup(args.client, args.output, args.tools)
+        elif args.command == "qa":
+            from achilles.cli.qa import run_qa
+
+            values = vars(args).copy()
+            if args.qa_operation == "request" and not values.get("expected_status"):
+                values["expected_status"] = [200]
+            asyncio.run(run_qa(args.qa_operation, args.cdp_port, values))
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 

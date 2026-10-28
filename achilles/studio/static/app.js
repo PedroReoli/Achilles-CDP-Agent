@@ -1,0 +1,14 @@
+const token=document.querySelector('meta[name="achilles-token"]').content;
+const output=document.querySelector('#output');
+const headers={'Content-Type':'application/json','X-Achilles-Studio-Token':token};
+const template={name:'smoke-local',base_url:'http://127.0.0.1:8000',concurrency:4,stop_on_failure:false,cases:[{id:'health',name:'Health responde',method:'GET',path:'/health',expected_status:[200],assertions:[{kind:'response_time_ms',expected:1500}]}]};
+document.querySelector('#suite').value=JSON.stringify(template,null,2);
+async function api(path,options={}){const response=await fetch(path,{...options,headers:{...headers,...options.headers}});const data=await response.json();if(!response.ok)throw new Error(JSON.stringify(data.error||data));return data}
+function show(value){output.textContent=JSON.stringify(value,null,2)}
+async function refresh(){try{const [status,runs]=await Promise.all([api('/api/status'),api('/api/runs')]);document.body.classList.add('online');document.querySelector('#status-label').textContent='runtime online';document.querySelector('#metric-scope').textContent=status.allowed_hosts.length+' hosts';document.querySelector('#metric-runs').textContent=runs.count;document.querySelector('#metric-pass').textContent=runs.runs[0]?.status||'—';document.querySelector('#runs').innerHTML=runs.runs.map(run=>`<div class="run"><div><b>${escapeHtml(run.suite||'suite')}</b><br><small>${run.run_id}</small></div><strong class="${run.status}">${run.status}</strong></div>`).join('')||'<small>Nenhuma execução ainda.</small>'}catch(error){document.querySelector('#status-label').textContent='runtime indisponível';show({error:String(error)})}}
+function escapeHtml(value){const node=document.createElement('span');node.textContent=String(value);return node.innerHTML}
+async function act(button,fn){button.disabled=true;try{show(await fn());await refresh()}catch(error){show({error:String(error)})}finally{button.disabled=false}}
+document.querySelector('#discover').onclick=event=>act(event.currentTarget,()=>api('/api/tools/qa_discover',{method:'POST',body:JSON.stringify({openapi:document.querySelector('#openapi').value||null,base_url:document.querySelector('#base-url').value||null,include_traffic:document.querySelector('#include-traffic').checked,limit:200})}));
+document.querySelector('#audit').onclick=event=>act(event.currentTarget,()=>api('/api/tools/qa_security_audit',{method:'POST',body:JSON.stringify({urls:document.querySelector('#audit-urls').value.split('\n').map(x=>x.trim()).filter(Boolean),include_traffic:document.querySelector('#audit-traffic').checked,timeout_ms:10000})}));
+document.querySelector('#run').onclick=event=>act(event.currentTarget,()=>api('/api/tools/qa_run_suite',{method:'POST',body:JSON.stringify({suite:JSON.parse(document.querySelector('#suite').value),variables:{}})}));
+refresh();

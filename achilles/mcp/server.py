@@ -21,6 +21,7 @@ SERVER_INSTRUCTIONS = (
     "Prefira browser_find_and_act e browser_fill_form para reduzir round-trips. "
     "Para aplicativos Windows use app_list, app_attach, app_snapshot e app_find_and_act; "
     "reserve app_click_at para interfaces sem acessibilidade e somente após screenshot recente. "
+    "Para QA use qa_discover, qa_plan e qa_run_suite; revise operações mutáveis e o escopo local. "
     "Use browser_extract_paginated para listas extensas e browser_events para acompanhar mudanças. "
     "Use browser_action somente com referência recente. CAPTCHA e 2FA exigem "
     "browser_wait_for_challenge e resolução humana. Respeite sempre a política local."
@@ -224,7 +225,7 @@ class MCPServer:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-async def run_mcp_stdio(cdp_port: int = 9222, toolsets: str = "core,desktop") -> None:
+async def run_mcp_stdio(cdp_port: int = 9222, toolsets: str = "core,desktop,qa") -> None:
     services = ApplicationServices(cdp_port)
     server = MCPServer(services, resolve_toolsets(toolsets))
     pending: Dict[RequestId, asyncio.Task[Any]] = {}

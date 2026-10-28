@@ -45,6 +45,7 @@ dist/
 htmlcov/
 test-results/
 .ruff_cache/
+.playwright-cli/
 .mypy_cache/
 nosetests.xml
 coverage.xml
@@ -64,6 +65,7 @@ achilles_profile/
 # --- Export Reports & Temporary Test Output ---
 *.html
 !achilles/browser_extension/bridge.html
+!achilles/studio/static/*.html
 !templates/**/*.html
 *.jsonl
 /benchmark.json

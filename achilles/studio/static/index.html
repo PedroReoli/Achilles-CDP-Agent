@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="achilles-token" content="__ACHILLES_STUDIO_TOKEN__">
+  <title>Achilles QA Studio</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">A</span><div><b>Achilles</b><small>QA Studio</small></div></div>
+    <div class="status"><span id="status-dot"></span><span id="status-label">conectando</span></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">QUALITY RUNTIME FOR AGENTS</p>
+      <h1>Encontre falhas antes<br>que seus usuários encontrem.</h1>
+      <p>Descubra endpoints, execute contratos HTTP e mantenha evidências reproduzíveis em um runtime local.</p>
+      <div class="metrics">
+        <article><span id="metric-runs">0</span><small>execuções</small></article>
+        <article><span id="metric-pass">—</span><small>último resultado</small></article>
+        <article><span id="metric-scope">local</span><small>escopo padrão</small></article>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="panel discover">
+        <div class="panel-title"><span>01</span><div><h2>Descobrir API</h2><p>Tráfego capturado ou contrato OpenAPI.</p></div></div>
+        <label>OpenAPI URL ou arquivo <input id="openapi" placeholder="http://127.0.0.1:8000/openapi.json"></label>
+        <label>Base URL opcional <input id="base-url" placeholder="http://127.0.0.1:8000"></label>
+        <label class="check"><input id="include-traffic" type="checkbox" checked> Incluir tráfego do navegador</label>
+        <button id="discover">Descobrir endpoints</button>
+      </article>
+
+      <article class="panel audit">
+        <div class="panel-title"><span>02</span><div><h2>Auditoria defensiva</h2><p>Headers, cookies, CORS e exposição.</p></div></div>
+        <label>URLs, uma por linha<textarea id="audit-urls" rows="5" placeholder="http://127.0.0.1:8000/health"></textarea></label>
+        <label class="check"><input id="audit-traffic" type="checkbox" checked> Incluir endpoints observados</label>
+        <button id="audit">Executar auditoria</button>
+      </article>
+    </section>
+
+    <section class="panel runner">
+      <div class="panel-title"><span>03</span><div><h2>Mission Runner de QA</h2><p>Suíte JSON declarativa, concorrência limitada e relatório persistente.</p></div></div>
+      <div class="editor-wrap">
+        <textarea id="suite" spellcheck="false"></textarea>
+        <aside>
+          <h3>Proteções ativas</h3>
+          <ul><li>Escopo por allowlist</li><li>Métodos mutáveis bloqueados</li><li>Secrets redigidos</li><li>Timeout por caso</li></ul>
+          <button id="run" class="primary">Executar suíte</button>
+        </aside>
+      </div>
+    </section>
+
+    <section class="grid lower">
+      <article class="panel output-panel"><div class="panel-title"><span>04</span><div><h2>Resultado</h2><p>Evidência estruturada da operação atual.</p></div></div><pre id="output">Pronto.</pre></article>
+      <article class="panel"><div class="panel-title"><span>05</span><div><h2>Execuções recentes</h2><p>Histórico local de regressões.</p></div></div><div id="runs" class="runs"></div></article>
+    </section>
+  </main>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
