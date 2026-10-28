@@ -57,10 +57,10 @@ jobs:
           python -m pip install build
           python -m build --wheel --sdist --outdir dist
 
-      - name: Verify browser extension is packaged
+      - name: Verify runtime assets are packaged
         run: |
-          python -c "import glob, zipfile; names = set(zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()); assert {'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html'} <= names"
-          python -c "import glob, tarfile; names = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames(); assert all(any(p.endswith('/' + f) for p in names) for f in ['CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html'])"
+          python -c "import glob, zipfile; names = set(zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()); assert {'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html', 'achilles/studio/static/index.html', 'achilles/studio/static/styles.css', 'achilles/studio/static/app.js'} <= names"
+          python -c "import glob, tarfile; names = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames(); assert all(any(p.endswith('/' + f) for p in names) for f in ['CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'achilles/browser_extension/manifest.json', 'achilles/browser_extension/bridge.html', 'achilles/studio/static/index.html'])"
 
   browser:
     name: Browser integration (Python 3.12 on ${{ matrix.os }})
