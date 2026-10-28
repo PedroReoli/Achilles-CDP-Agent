@@ -38,6 +38,12 @@ STEP_TO_TOOL = {
     "screenshot_app": "app_screenshot",
     "click_app_at": "app_click_at",
     "close_app": "app_close",
+    "qa_discover": "qa_discover",
+    "qa_plan": "qa_plan",
+    "qa_request": "qa_request",
+    "qa_run_suite": "qa_run_suite",
+    "qa_security_audit": "qa_security_audit",
+    "qa_report": "qa_report",
 }
 
 

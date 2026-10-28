@@ -9,6 +9,7 @@ from .desktop_contracts import (
     DESKTOP_MUTATING,
     DESKTOP_NON_IDEMPOTENT,
 )
+from .qa_contracts import QA_DESTRUCTIVE, QA_MUTATING, QA_NON_IDEMPOTENT
 
 BROWSER_MUTATING = {
     "browser_select_page", "browser_new_tab", "browser_close_tab", "browser_navigate",
@@ -81,9 +82,9 @@ def build_tool_catalog(
     descriptions: Dict[str, str],
     allowed_names: Optional[set] = None,
 ) -> Dict[str, Any]:
-    mutating = BROWSER_MUTATING | DESKTOP_MUTATING
-    destructive = BROWSER_DESTRUCTIVE | DESKTOP_DESTRUCTIVE
-    non_idempotent = BROWSER_NON_IDEMPOTENT | DESKTOP_NON_IDEMPOTENT
+    mutating = BROWSER_MUTATING | DESKTOP_MUTATING | QA_MUTATING
+    destructive = BROWSER_DESTRUCTIVE | DESKTOP_DESTRUCTIVE | QA_DESTRUCTIVE
+    non_idempotent = BROWSER_NON_IDEMPOTENT | DESKTOP_NON_IDEMPOTENT | QA_NON_IDEMPOTENT
     tools = []
     for name, contract in contracts.items():
         if allowed_names is not None and name not in allowed_names:
@@ -96,7 +97,7 @@ def build_tool_catalog(
                 "readOnlyHint": name not in mutating,
                 "destructiveHint": name in destructive,
                 "idempotentHint": name not in non_idempotent,
-                "openWorldHint": name.startswith(("browser_", "network_", "app_")),
+                "openWorldHint": name.startswith(("browser_", "network_", "app_", "qa_")),
             },
         }
         if name in OUTPUT_SCHEMAS:

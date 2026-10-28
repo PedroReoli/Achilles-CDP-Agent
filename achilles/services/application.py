@@ -21,6 +21,8 @@ from .domain_memory import DomainMemoryEngine
 from .errors import ServiceError
 from .observation_engine import ObservationEngine
 from .policy import PolicyEngine
+from .qa_contracts import QA_CONTRACTS, QA_DESCRIPTIONS, QA_TOOLSET
+from .qa_service import QaService
 from .redaction import redact, redact_url
 from .security_engine import SecurityAuditEngine
 from .session_manager import BrowserSessionManager
@@ -254,6 +256,7 @@ CONTRACTS: Dict[str, Type[Arguments]] = {
     "security_audit": PageArguments,
 }
 CONTRACTS.update(DESKTOP_CONTRACTS)
+CONTRACTS.update(QA_CONTRACTS)
 DESCRIPTIONS = {
     "browser_status": "Estado do transporte e da captura, sem conectar automaticamente.",
     "browser_list_pages": "Lista abas e frames disponíveis no navegador CDP conectado.",
@@ -292,6 +295,7 @@ DESCRIPTIONS = {
     "security_audit": "Auditoria passiva com evidência e cobertura ausente explícitas.",
 }
 DESCRIPTIONS.update(DESKTOP_DESCRIPTIONS)
+DESCRIPTIONS.update(QA_DESCRIPTIONS)
 
 TOOLSETS = {
     "core": {
@@ -330,6 +334,7 @@ TOOLSETS = {
         "browser_bookmarks_remove",
     },
     "desktop": DESKTOP_TOOLSET,
+    "qa": QA_TOOLSET,
 }
 
 
@@ -359,6 +364,7 @@ class ApplicationServices:
         self.domain_memory = DomainMemoryEngine()
         self.policy = PolicyEngine()
         self.desktop = DesktopService(self.policy)
+        self.qa = QaService(self.journal, self.policy)
         self.closed = False
         self.events = deque(maxlen=200)
         self.challenge_events = deque(maxlen=50)
@@ -375,7 +381,7 @@ class ApplicationServices:
         outcome = "ok"
         try:
             current_url = ""
-            if (self.policy.config.get("domains") and not name.startswith("app_")
+            if (self.policy.config.get("domains") and not name.startswith(("app_", "qa_"))
                     and not arguments.get("url") and name not in (
                 "browser_status", "browser_list_pages", "browser_events",
                 "browser_recording", "browser_domain_memory",
@@ -482,6 +488,8 @@ class ApplicationServices:
             ) from exc
         if name.startswith("app_"):
             return await self.desktop.call(name, args)
+        if name.startswith("qa_"):
+            return await self.qa.call(name, args)
         if name == "browser_status":
             return {
                 "cdp_url": self.session.cdp_url,
@@ -662,6 +670,7 @@ class ApplicationServices:
         }
 
     async def close(self) -> None:
+        await self.qa.close()
         await self.desktop.close()
         await self.observations.close()
         await self.session.close()

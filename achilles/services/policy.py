@@ -1,6 +1,7 @@
 """Políticas locais de domínio e ferramenta aplicadas antes da execução."""
 
 import fnmatch
+import ipaddress
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
@@ -33,6 +34,8 @@ MUTATING_TOOLS = {
     "app_fill_form",
     "app_click_at",
     "app_close",
+    "qa_request",
+    "qa_run_suite",
 }
 
 DEFAULT_PROTECTED_APPS = [
@@ -108,3 +111,45 @@ class PolicyEngine:
         denied_titles = desktop.get("deny_window_titles", [])
         if denied_titles and self._matches(title, denied_titles):
             raise ServiceError("APP_DENIED", "A política bloqueia esta janela.")
+
+    def check_qa(self, url: str, method: str, allow_mutating: bool = False) -> None:
+        """Limita QA HTTP ao escopo autorizado e impede mutações implícitas."""
+        parsed = urlsplit(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ServiceError("QA_TARGET_INVALID", "QA aceita somente URLs HTTP(S) completas.")
+        if parsed.username or parsed.password:
+            raise ServiceError("QA_TARGET_INVALID", "Credenciais não podem ser incluídas na URL.")
+        host = parsed.hostname.casefold()
+        qa = self.config.get("qa", {})
+        if not isinstance(qa, dict):
+            raise ServiceError("POLICY_INVALID", "qa precisa ser um objeto YAML.")
+        denied = qa.get("deny_hosts", [])
+        allowed = qa.get("allow_hosts", ["localhost", "127.0.0.1", "::1"])
+        if not isinstance(denied, list) or not isinstance(allowed, list):
+            raise ServiceError("POLICY_INVALID", "qa.allow_hosts e qa.deny_hosts precisam ser listas.")
+        if self._matches(host, denied):
+            raise ServiceError("QA_SCOPE_DENIED", f"O escopo QA bloqueia {host}.")
+        if not self._matches(host, allowed):
+            raise ServiceError(
+                "QA_SCOPE_DENIED",
+                f"{host} não está em qa.allow_hosts do policy.yaml.",
+            )
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        if address and (address.is_link_local or address.is_multicast or address.is_unspecified):
+            raise ServiceError("QA_SCOPE_DENIED", "Endereço especial não pode ser alvo de QA.")
+        if address and address.is_private and not address.is_loopback:
+            if qa.get("allow_private_networks", False) is not True:
+                raise ServiceError(
+                    "QA_SCOPE_DENIED",
+                    "Rede privada exige qa.allow_private_networks: true.",
+                )
+        normalized_method = method.upper()
+        if normalized_method not in ("GET", "HEAD", "OPTIONS"):
+            if not allow_mutating or qa.get("allow_mutating_methods", False) is not True:
+                raise ServiceError(
+                    "QA_MUTATION_DENIED",
+                    "Método mutável exige allow_mutating e qa.allow_mutating_methods: true.",
+                )
