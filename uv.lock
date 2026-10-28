@@ -11,6 +11,7 @@ name = "achilles-cdp"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pillow", marker = "sys_platform == 'win32'" },
     { name = "playwright" },
     { name = "pydantic" },
@@ -33,6 +34,7 @@ test = [
 requires-dist = [
     { name = "build", marker = "extra == 'build'", specifier = ">=1.2,<2" },
     { name = "fastapi", specifier = ">=0.129,<1" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27,<1" },
     { name = "pillow", marker = "sys_platform == 'win32'", specifier = ">=10,<13" },
     { name = "playwright", specifier = ">=1.59,<2" },
