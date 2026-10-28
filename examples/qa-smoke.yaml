@@ -1,0 +1,15 @@
+name: achilles-local-smoke
+base_url: http://127.0.0.1:8000
+concurrency: 4
+stop_on_failure: false
+cases:
+  - id: health
+    name: Health responde
+    method: GET
+    path: /health
+    expected_status: [200]
+    assertions:
+      - kind: response_time_ms
+        expected: 1500
+      - kind: schema_required
+        expected: [status]

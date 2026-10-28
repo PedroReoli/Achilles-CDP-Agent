@@ -18,7 +18,7 @@ No REST, configure `ACHILLES_API_TOKEN` no ambiente ou use o token aleatório ex
 
 ## Contrato compartilhado
 
-`GET /api/tools.json` e MCP `tools/list` retornam o mesmo catálogo. Cada operação REST é `POST /api/tools/{name}`; o corpo é o objeto `arguments` da tool MCP. O transporte MCP usa o toolset `core` por padrão e aceita `--tools core,network,security,memory,bookmarks` ou `--tools all`, reduzindo o contexto entregue ao agente.
+`GET /api/tools.json` e MCP `tools/list` retornam o mesmo catálogo. Cada operação REST é `POST /api/tools/{name}`; o corpo é o objeto `arguments` da tool MCP. O transporte MCP usa `core,desktop,qa` por padrão e aceita também `network`, `security`, `memory`, `bookmarks` ou `all`, reduzindo o contexto entregue ao agente.
 
 `browser_find` retorna apenas correspondências e referências acionáveis. `browser_extract` recebe um seletor de itens e campos CSS declarativos; não aceita JavaScript arbitrário. Para shell e agentes, `achilles call` escreve JSON em stdout, erros estruturados em stderr e usa exit code diferente de zero em falhas.
 
@@ -38,6 +38,14 @@ No REST, configure `ACHILLES_API_TOKEN` no ambiente ou use o token aleatório ex
 | `network_curl` | `request_id`, `shell?` (`posix` ou `powershell`) |
 | `network_postman` | `{}` |
 | `security_audit` | `page_id?` |
+| `qa_discover` | `openapi?`, `base_url?`, `include_traffic?`, `page_id?`, `limit?` |
+| `qa_plan` | `endpoints`, `suite_name?`, `base_url?`, `include_mutating?` |
+| `qa_request` | `method`, `url`, `expected_status?`, `assertions?`, `allow_mutating?` |
+| `qa_run_suite` | exatamente um entre `suite` e `path`; `variables?` |
+| `qa_security_audit` | `urls?`, `include_traffic?`, `page_id?`, `timeout_ms?` |
+| `qa_report` | `run_id?`, `format?` (`json`, `html`, `junit`), `output_path?` |
+
+O runtime QA usa allowlist própria e aceita somente loopback por padrão. Requisições mutáveis recebem `destructiveHint` no MCP e exigem tanto autorização na política local quanto `allow_mutating: true` no caso. Consulte [qa-studio.md](qa-studio.md).
 
 Exemplo de ação, usando os valores reais obtidos no snapshot:
 

@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <strong>Automação de navegador e aplicativos Windows para agentes locais.</strong><br>
-  <em>Chrome/Edge CDP • Windows UI Automation • MCP • CLI • REST local</em>
+  <strong>Automação e QA de navegadores, APIs e aplicativos Windows para agentes locais.</strong><br>
+  <em>Chrome/Edge CDP • Windows UI Automation • QA Studio • MCP • CLI • REST</em>
 </p>
 
 <p align="center">
@@ -74,6 +74,13 @@ O runtime Windows opera em um worker isolado, usa nomes/papéis acessíveis ante
 * Interfaces sem acessibilidade podem usar clique visual relativo a um screenshot recente.
 * O worker UIA é separado do processo MCP e respeita `policy.yaml`. Veja o [guia de desktop](.docs/windows-desktop.md).
 
+### 10. 🧪 QA para APIs e agentes
+* Descobre endpoints pelo tráfego real e por OpenAPI JSON/YAML.
+* Executa casos e suítes HTTP com assertions, concorrência limitada e evidências redigidas.
+* Audita headers, CORS, cookies e exposição de servidor sem payloads de exploração.
+* Exporta JSON, HTML e JUnit XML para CI e agentes.
+* Inclui o **Achilles QA Studio**, uma interface local em Python + HTML/CSS/JavaScript. Veja o [guia de QA](.docs/qa-studio.md).
+
 ---
 
 ## 🏗️ Arquitetura do Sistema
@@ -99,6 +106,7 @@ graph TD
         Redact["Redação de dados sensíveis"]
         Bookmarks["Favoritos"]
         Desktop["Desktop Service"]
+        QA["QA Engine"]
     end
 
     subgraph ChromeRuntime ["Chrome / Edge (perfil conectado)"]
@@ -112,6 +120,12 @@ graph TD
         Worker["Worker UIA isolado"]
         Apps["Apps e janelas"]
         Vision["Screenshot + fallback visual"]
+    end
+
+    subgraph QARuntime ["QA Runtime"]
+        Studio["QA Studio local"]
+        HTTP["HTTP Contract Runner"]
+        Evidence["JSON / HTML / JUnit"]
     end
 
     AI --> CLI
@@ -128,6 +142,7 @@ graph TD
     AppSvc --> Redact
     AppSvc --> Bookmarks
     AppSvc --> Desktop
+    AppSvc --> QA
     AppSvc --> CDP
     AppSvc --> HUD
     CDP --> Pages
@@ -135,6 +150,9 @@ graph TD
     Desktop --> Worker
     Worker --> Apps
     Worker --> Vision
+    QA --> HTTP
+    Studio --> QA
+    HTTP --> Evidence
     User -.->|Interage no navegador / 2FA| Pages
 ```
 
@@ -186,7 +204,7 @@ Adicione o Achilles no arquivo de configuração do seu cliente MCP (`claude_des
   "mcpServers": {
     "achilles": {
       "command": "achilles",
-      "args": ["mcp", "--cdp-port", "9222", "--tools", "core,desktop"]
+      "args": ["mcp", "--cdp-port", "9222", "--tools", "core,desktop,qa"]
     }
   }
 }
@@ -213,6 +231,10 @@ O catálogo atual inclui ferramentas para páginas, rede, relatórios, seguranç
 * `app_find_and_act` e `app_fill_form`: Operações compostas com menos round-trips.
 * `app_screenshot` e `app_click_at`: Fallback visual protegido por screenshot recente.
 * `app_wait_for_state` e `app_close`: Sincronização e fechamento gracioso, sem matar processos.
+* `qa_discover` e `qa_plan`: Descoberta de endpoints e criação de suíte revisável.
+* `qa_request` e `qa_run_suite`: Casos HTTP e regressões com assertions.
+* `qa_security_audit`: Auditoria defensiva, sem exploração destrutiva.
+* `qa_report` e `qa_runs`: Histórico e exportação JSON, HTML ou JUnit.
 
 O servidor MCP usa stdio e mantém o stdout reservado a JSON-RPC. `browser_status` e `tools/list` não iniciam o navegador; ferramentas que precisam dele tentam conectar ou iniciar o perfil configurado. Respostas extensas são limitadas como JSON válido. Veja [contratos, versões e limites](.docs/application-services.md).
 
@@ -254,6 +276,11 @@ O Achilles lista, busca, cria, edita e remove favoritos do perfil conectado pela
 | `achilles call browser_status` | Executa uma ferramenta e retorna JSON estável para scripts/agentes |
 | `achilles call app_list -a '{"limit":20}'` | Lista aplicativos Windows acessíveis por UIA |
 | `achilles call app_status` | Valida o worker de desktop isolado |
+| `achilles qa discover --openapi <url>` | Descobre endpoints por OpenAPI e tráfego capturado |
+| `achilles qa run suite.yaml` | Executa uma suíte de regressão HTTP |
+| `achilles qa audit <url>` | Audita postura defensiva de endpoints autorizados |
+| `achilles qa report --format junit` | Exporta a execução mais recente para CI |
+| `achilles studio` | Abre o QA Studio local em `127.0.0.1:8766` |
 | `achilles --ai` | Exibe o protocolo autônomo com diretrizes para agentes de IA |
 
 ### Workflows e Mission Runner
@@ -277,6 +304,8 @@ steps:
 ```
 
 Aplicativos Windows usam as operações `launch_app`, `attach_app`, `snapshot_app`, `find_app`, `act_app`, `find_and_act_app`, `fill_app_form`, `wait_app`, `screenshot_app`, `click_app_at` e `close_app` no mesmo Mission Runner.
+
+QA usa `qa_discover`, `qa_plan`, `qa_request`, `qa_run_suite`, `qa_security_audit` e `qa_report`. Isso permite que um agente combine jornada web, tráfego observado e testes de contrato no mesmo workflow auditável.
 
 ```powershell
 achilles run workflow.yaml
@@ -302,7 +331,14 @@ tools:
 desktop:
   deny_apps: [credentialuibroker.exe]
   allow_coordinate_actions: false
+qa:
+  allow_hosts: [localhost, 127.0.0.1, api.staging.example.com]
+  deny_hosts: [production.example.com]
+  allow_private_networks: false
+  allow_mutating_methods: false
 ```
+
+O QA aceita somente loopback por padrão. Alvos externos precisam entrar explicitamente em `qa.allow_hosts`; métodos mutáveis também exigem `allow_mutating_methods: true` na política e `allow_mutating: true` no caso.
 
 ---
 

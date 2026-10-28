@@ -18,6 +18,10 @@ Este arquivo registra mudanças relevantes ao usuário. O bloco abaixo reúne al
 - Toolset `desktop` para abrir, anexar, observar e controlar aplicativos Windows por UI Automation.
 - Worker UIA isolado, formulários de desktop, espera de estado e fallback visual por screenshot recente.
 - Políticas allow/deny por executável e título, com bloqueio de superfícies protegidas do Windows.
+- Toolset `qa` com descoberta por tráfego/OpenAPI, assertions HTTP, suítes concorrentes e histórico persistente.
+- Auditoria defensiva de endpoints e relatórios JSON, HTML e JUnit XML.
+- Achilles QA Studio local em Python, HTML, CSS e JavaScript.
+- Política QA deny-by-default para hosts externos e dupla confirmação de métodos mutáveis.
 
 - `achilles --extension` prepara a extensão de favoritos para instalação manual e notifica o usuário no Windows.
 - Ferramentas CLI, MCP e REST para listar, buscar, criar, editar e remover favoritos de Chrome/Edge por extensão com permissão `bookmarks`.
