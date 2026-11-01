@@ -27,7 +27,7 @@ dependencies = [
   "pydantic>=2.6,<3",
   "rich>=13,<16",
   "pyyaml>=6,<7",
-  "pillow>=10,<13; sys_platform == 'win32'",
+  "pillow>=10,<14; sys_platform == 'win32'",
   "pywinauto>=0.6.9,<0.7; sys_platform == 'win32'",
 ]
 
